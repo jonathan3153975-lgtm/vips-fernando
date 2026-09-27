@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Core\Session;
 use App\Repositories\AuditLogRepository;
+use App\Repositories\TenantRepository;
 use App\Repositories\UserRepository;
 
 final class AuthService
@@ -13,6 +14,7 @@ final class AuthService
     public function __construct(
         private readonly UserRepository $users,
         private readonly AuditLogRepository $auditLogs,
+        private readonly TenantRepository $tenants,
         private readonly Session $session,
     ) {
     }
@@ -43,6 +45,12 @@ final class AuthService
 
         try {
             $permissions = $this->users->permissionsForUser((int) $user['id']);
+
+            if ($this->tenants->settings() === null) {
+                $this->tenants->ensureSettings();
+            }
+
+            $settings = $this->tenants->settings();
         } catch (\Throwable $exception) {
             $this->session->forget('auth');
             $this->session->invalidate();
@@ -52,6 +60,7 @@ final class AuthService
 
         $auth = $this->session->get('auth');
         $auth['permissions'] = $permissions;
+        $auth['settings'] = is_array($settings) ? $settings : [];
         $this->session->put('auth', $auth);
 
         $this->users->updateLastLogin((int) $user['id']);
@@ -93,5 +102,23 @@ final class AuthService
         }
 
         return in_array($permission, $user['permissions'], true);
+    }
+
+    /**
+     * Mantem a copia das configuracoes na sessao alinhada apos uma alteracao,
+     * para que a propria requisicao seguinte ja exiba o novo formato.
+     *
+     * @param array<string, mixed> $settings
+     */
+    public function syncTenantSettings(array $settings): void
+    {
+        $auth = $this->user();
+
+        if ($auth === null) {
+            return;
+        }
+
+        $auth['settings'] = $settings;
+        $this->session->put('auth', $auth);
     }
 }

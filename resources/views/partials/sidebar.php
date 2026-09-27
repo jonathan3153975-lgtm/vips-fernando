@@ -11,6 +11,7 @@ $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_Q
 $activeNav = $activeNav ?? '';
 $currentUser = $currentUser ?? null;
 $canManageUsers = $canManageUsers ?? false;
+$canManageSettings = $canManageSettings ?? false;
 
 $has = static function (string $permission) use ($currentUser): bool {
     if (!is_array($currentUser)) {
@@ -33,6 +34,9 @@ $has = static function (string $permission) use ($currentUser): bool {
         <?php if ($has('users.view')): ?>
             <a class="item<?= $activeNav === 'users' ? ' active' : '' ?>" href="/usuarios">Usuarios</a>
             <a class="item<?= $activeNav === 'roles' ? ' active' : '' ?>" href="/perfis">Perfis</a>
+        <?php endif; ?>
+        <?php if ($has('settings.manage')): ?>
+            <a class="item<?= $activeNav === 'settings' ? ' active' : '' ?>" href="/configuracoes">Configuracoes</a>
         <?php endif; ?>
     </div>
 </aside>

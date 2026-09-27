@@ -162,18 +162,41 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 - [ ] `P2` Envio de e-mail (ver `manual/20 — Integrações Externas`) com template e link assinada.
 
 ### 2.3 Tenant e configurações (EPIC 03)
-> Hoje `tenant_settings` é criada e populada pelo seed, mas **nunca é lida pelo código**.
+> Antes: `tenant_settings` era criada e populada pelo seed, mas **nunca lida pelo código**, e `tenants` não tinha índice único. Ambos resolvidos abaixo.
 
-> **Achado da 2.1:** a tabela `tenants` só tem a chave primária — **nenhum índice único**. O `ON DUPLICATE KEY UPDATE` do seed nunca dispara, então cada `composer seed` insere "Tenant Demo" de novo (foi assim que apareceram os tenants #901–#904). Sem unique em `document` e `email`, duas empresas podem registrar o mesmo CNPJ. Precisa de migration, e a limpeza dos duplicados vai junto.
-
-- [ ] `P1` Migration com `UNIQUE` em `tenants.document` e `tenants.email`, após remover duplicados.
-- [ ] `P1` `TenantRepository` + `TenantService`: cadastro, leitura e atualização de `tenant_settings`.
-- [ ] `P1` `TenantContext`: resolver `tenant_id` ativo na sessão e expor moeda, timezone e formato de data para as views.
-- [ ] `P1` Fazer `APP_TIMEZONE` e o formato de data refletirem o tenant, não o global.
-- [ ] `P1` Exibir moeda do tenant nos campos de valor e nos cards de indicadores.
-- [ ] `P1` Tela de configurações do tenant.
+- [x] `P1` Migration com `UNIQUE` em `tenants.document` e `tenants.email`, após remover duplicados.
+- [x] `P1` `TenantRepository` + `TenantService`: cadastro, leitura e atualização de `tenant_settings`.
+- [x] `P1` `TenantContext`: resolver `tenant_id` ativo na sessão e expor moeda, timezone e formato de data para as views.
+- [x] `P1` Fazer `APP_TIMEZONE` e o formato de data refletirem o tenant, não o global.
+- [x] `P1` Exibir moeda do tenant nos campos de valor e nos cards de indicadores.
+- [x] `P1` Tela de configurações do tenant.
 - [ ] `P2` Troca de tenant para usuário com acesso a mais de uma empresa.
 - [ ] `P2` Painel administrativo do SaaS (criar/empresa, suspender assinatura, limites) — `manual/19`.
+
+**Implementado:**
+- Migration `2026_08_01_000013_add_unique_constraints_to_tenants_table`: `uq_tenants_document` e `uq_tenants_email`. O `up()` **não apaga duplicados**: se houver, lança exceção listando os valores e pede reconciliação, porque remover empresa e dados vinculados é decisão humana. Com o índice, o `ON DUPLICATE KEY` do seed passou a funcionar e `composer seed` virou idempotente (rodar duas vezes não duplica mais o tenant).
+- `TenantRepository` estende `TenantScopedRepository`. Como `tenants` não tem coluna `tenant_id`, o escopo usa `WHERE id = :tenant_id` / `WHERE tenant_id = :tenant_id`, e o tenant ativo continua sendo injetado pela guarda — não existe parâmetro para escolher outro tenant. Única via sem sessão é `create()`, para cadastro (`manual/19`, P2), no mesmo padrão de `AuditLogRepository::createForTenant`.
+- `TenantService`: leitura (`settings()`), atualização parcial e validação. Valida moeda (ISO de 3 letras), fuso (`timezone_identifiers_list()`), idioma (`xx-YY`) e formato de data (whitelist de caracteres, porque o valor vai direto para `date()`). `ensureSettings()` recria a linha com defaults se ela sumir.
+- `TenantContext` passou a expor `settings()`, `currency()`, `timezone()`, `language()` e `dateFormat()`, lidos de `$_SESSION['auth']['settings']`. Sessões antigas caem nos defaults. `AuthService::attempt()` carrega as configurações no login, dentro do mesmo try que faz rollback da sessão.
+- `app/Support/TenantFormatter`: formata data e moeda. Fica fora das views porque o `manual/1` proíbe regra de negócio na view. `users/index` e `users/show` deixaram de mostrar `last_login` cru e agora exibem com o formato e o fuso do tenant.
+- Tela `/configuracoes` (`TenantController`, view `tenant/settings.php`, item no menu lateral) com prévia do formato salvo. Form nativo posta em rota web com PRG, pelo mesmo motivo da 2.1 (rota `/api/` rejeita form com 415).
+- Nova permissão `settings.manage` (seed + fixture), concedida aos perfis admin. Leitura e escrita da tela exigem a permissão.
+
+**Decisão de projeto registrada — timezone:**
+- O timezone do tenant é aplicado **na exibição**, via `TenantFormatter`, e **não** em `date_default_timezone_set()`. Motivo: as gravações usam `date('Y-m-d H:i:s')` e caem em colunas `DATETIME`/`TIMESTAMP`; em MySQL, `TIMESTAMP` é convertido pelo `time_zone` da sessão e `DATETIME` guarda o literal. Mudar o fuso global no meio do request deslocaria timestamps já gravados e tornaria a auditoria ambígua. O item do roteiro é atendido no que importa (a exibição reflete o tenant); a adoção de UTC na escrita fica para a Etapa 3, quando os fechamentos passam a congelar valores.
+- Consequência aceita: `TenantService` formata com o fuso de origem `APP_TIMEZONE` e converte para o fuso do tenant. Se a aplicação passar a gravar em UTC, basta trocar a constante injetada em `routes/web.php`.
+
+**Validação:**
+- `tests/Integration/TenantSettingsTest.php` (16 testes): RBAC 403, leitura e escrita por tenant, isolamento entre tenants, rejeições sem escrita, recriação de settings ausentes, formato/fuso na listagem de usuários e criação de tenant com defaults. Suíte completa: **101 testes / 394 asserções**, verde.
+- `composer lint` verde em 87 arquivos.
+- Probe no MySQL real: 24/24 verificações, incluindo isolamento entre tenants, rejeições, unicidade (`Duplicate entry ... for key 'uq_tenants_document'/'uq_tenants_email'`) e repetição com `PDO::ATTR_EMULATE_PREPARES = false`. Dados do probe removidos.
+- Smoke HTTP com `php -S`: 18/18 verificações do fluxo real de login, tela, prévia, gravação, rejeição de valor inválido e restauração.
+
+**Limitações conhecidas:**
+- Não há tela nem rota de cadastro de tenant; `TenantRepository::create()` existe e é testado, mas o cadastro público pertence ao painel do SaaS (P2, `manual/19`).
+- A moeda é exibida na prévia das configurações e está pronta para os campos de valor, mas ainda não existem telas de importação/produto/venda/financeiro para consumi-la. O roteiro da Etapa 9 (dashboard) é quem vai usar `TenantFormatter::money()` nos cards de indicadores.
+- O idioma é armazenado e validado, mas a interface continua em pt-BR; tradução não está no escopo do MVP.
+- `date_format` é limitado a uma whitelist de caracteres; formatos que misturam texto literal (ex.: `j \d\e F`) são rejeitados de propósito.
 
 ### 2.4 Garantia estrutural de isolamento (prioridade máxima de segurança)
 - [x] `P1` Introduzir uma camada base de repositório que **exija** `tenant_id` em toda consulta de negócio, tornando o vazamento de dados impossível por omissão.

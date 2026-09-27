@@ -2,6 +2,7 @@
 /** @var array<string, mixed> $user */
 /** @var string $csrfField */
 /** @var bool $canManageUsers */
+/** @var \App\Support\TenantFormatter $formatter */
 
 $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 $activeNav = 'users';
@@ -59,7 +60,7 @@ $activeNav = 'users';
                 </article>
                 <article class="card">
                     <div class="eyebrow">Ultimo acesso</div>
-                    <strong><?= $user['last_login'] ? $e($user['last_login']) : 'nunca' ?></strong>
+                    <strong><?= $user['last_login'] ? $e($formatter->date($user['last_login'], true)) : 'nunca' ?></strong>
                 </article>
             </section>
 

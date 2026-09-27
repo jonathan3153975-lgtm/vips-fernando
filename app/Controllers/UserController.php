@@ -11,6 +11,7 @@ use App\Core\ResponseFactory;
 use App\Core\Session;
 use App\Services\AuthService;
 use App\Services\RoleService;
+use App\Services\TenantService;
 use App\Services\UserService;
 use RuntimeException;
 
@@ -19,6 +20,7 @@ final class UserController extends Controller
     public function __construct(
         private readonly UserService $users,
         private readonly RoleService $roles,
+        private readonly TenantService $tenants,
         private readonly AuthService $auth,
         private readonly Session $session,
     ) {
@@ -100,6 +102,8 @@ final class UserController extends Controller
             'session' => $this->session,
             'csrfField' => Csrf::field($this->session),
             'canManageUsers' => $this->auth->hasPermission('users.manage'),
+            'canManageSettings' => $this->auth->hasPermission('settings.manage'),
+            'formatter' => $this->tenants->formatter(),
         ];
     }
 }

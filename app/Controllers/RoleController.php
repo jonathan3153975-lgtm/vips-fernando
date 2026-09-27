@@ -90,6 +90,7 @@ final class RoleController extends Controller
             'session' => $this->session,
             'csrfField' => Csrf::field($this->session),
             'canManageUsers' => $this->auth->hasPermission('users.manage'),
+            'canManageSettings' => $this->auth->hasPermission('settings.manage'),
         ];
     }
 }

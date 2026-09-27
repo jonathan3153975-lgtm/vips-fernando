@@ -164,6 +164,15 @@ abstract class ApiIntegrationTestCase extends TestCase
         return $router->dispatch(strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')), (string) ($_SERVER['REQUEST_URI'] ?? '/'));
     }
 
+    /**
+     * Registra a Application com o banco do teste, para exercitar repositories
+     * e services diretamente, sem passar pelo router.
+     */
+    protected function bootApplication(): void
+    {
+        new Application($this->config(), dirname(__DIR__, 2) . '/routes/web.php');
+    }
+
     protected function responseJson(array $response): array
     {
         $decoded = json_decode($response['body'], true);
@@ -204,6 +213,7 @@ abstract class ApiIntegrationTestCase extends TestCase
 
         $statements = [
             'CREATE TABLE tenants (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, document TEXT, email TEXT, phone TEXT, logo TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE tenant_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT \'BRL\', timezone TEXT NOT NULL DEFAULT \'America/Sao_Paulo\', language TEXT NOT NULL DEFAULT \'pt-BR\', date_format TEXT NOT NULL DEFAULT \'d/m/Y\', created_at TEXT, updated_at TEXT)',
             'CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER, name TEXT NOT NULL, description TEXT, is_system INTEGER NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT)',
@@ -232,6 +242,11 @@ abstract class ApiIntegrationTestCase extends TestCase
         $pdo->exec("INSERT INTO tenants (id, name, status, created_at, updated_at) VALUES (1, 'Tenant One', 'ACTIVE', '$now', '$now')");
         $pdo->exec("INSERT INTO tenants (id, name, status, created_at, updated_at) VALUES (2, 'Tenant Two', 'ACTIVE', '$now', '$now')");
 
+        // Configuracoes diferentes por tenant: prova que a exibicao e o escopo
+        // nao vazam de um para o outro.
+        $pdo->exec("INSERT INTO tenant_settings (tenant_id, currency, timezone, language, date_format, created_at, updated_at) VALUES (1, 'BRL', 'America/Sao_Paulo', 'pt-BR', 'd/m/Y', '$now', '$now')");
+        $pdo->exec("INSERT INTO tenant_settings (tenant_id, currency, timezone, language, date_format, created_at, updated_at) VALUES (2, 'USD', 'America/New_York', 'en-US', 'm/d/Y', '$now', '$now')");
+
         $pdo->exec("INSERT INTO roles (id, tenant_id, name, description, is_system, created_at, updated_at) VALUES (1, 1, 'admin', 'Admin Tenant 1', 1, '$now', '$now')");
         $pdo->exec("INSERT INTO roles (id, tenant_id, name, description, is_system, created_at, updated_at) VALUES (2, 1, 'viewer', 'Viewer Tenant 1', 1, '$now', '$now')");
         $pdo->exec("INSERT INTO roles (id, tenant_id, name, description, is_system, created_at, updated_at) VALUES (3, 2, 'admin', 'Admin Tenant 2', 1, '$now', '$now')");
@@ -247,6 +262,7 @@ abstract class ApiIntegrationTestCase extends TestCase
             8 => 'stock.view',
             9 => 'users.view',
             10 => 'users.manage',
+            11 => 'settings.manage',
         ];
 
         foreach ($permissions as $id => $name) {
@@ -261,7 +277,7 @@ abstract class ApiIntegrationTestCase extends TestCase
         }
 
         // viewer (role 2) fica restrito a imports.view, para exercitar o 403.
-        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10]];
+        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [1, 11], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10], [3, 11]];
 
         foreach ($grants as [$roleId, $permissionId]) {
             $statement = $pdo->prepare('INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (:role_id, :permission_id, :created_at)');
@@ -321,5 +337,13 @@ abstract class ApiIntegrationTestCase extends TestCase
         $statement->execute($params);
 
         return $statement->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    protected function execSql(string $sql, array $params = []): int
+    {
+        $statement = $this->pdo()->prepare($sql);
+        $statement->execute($params);
+
+        return $statement->rowCount();
     }
 }

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Core\Application;
 use App\Core\Session;
 use App\Controllers\Api\AuthApiController;
 use App\Controllers\Api\ImportApiController;
@@ -13,6 +14,7 @@ use App\Controllers\DashboardController;
 use App\Controllers\HealthController;
 use App\Controllers\HomeController;
 use App\Controllers\RoleController;
+use App\Controllers\TenantController;
 use App\Controllers\UserController;
 use App\Middlewares\AuthMiddleware;
 use App\Middlewares\CsrfMiddleware;
@@ -24,6 +26,7 @@ use App\Repositories\PasswordResetRepository;
 use App\Repositories\PermissionRepository;
 use App\Repositories\ProductRepository;
 use App\Repositories\RoleRepository;
+use App\Repositories\TenantRepository;
 use App\Repositories\UserRepository;
 use App\Services\AuthService;
 use App\Services\HealthService;
@@ -31,6 +34,7 @@ use App\Services\ImportService;
 use App\Services\PasswordResetService;
 use App\Services\ProductService;
 use App\Services\RoleService;
+use App\Services\TenantService;
 use App\Services\UserService;
 
 $router->get('/', static fn (): array => (new HomeController())->index());
@@ -39,11 +43,17 @@ $router->get('/health', static fn (): array => (new HealthController(new HealthS
 $session = new Session();
 $auditLogRepository = new AuditLogRepository();
 $userRepository = new UserRepository();
-$authService = new AuthService($userRepository, $auditLogRepository, $session);
+$tenantRepository = new TenantRepository();
+$authService = new AuthService($userRepository, $auditLogRepository, $tenantRepository, $session);
 $passwordResetService = new PasswordResetService($userRepository, new PasswordResetRepository(), $auditLogRepository);
 $importService = new ImportService(new ImportRepository(), $auditLogRepository);
 $productService = new ProductService(new ProductRepository(), $auditLogRepository);
 $roleRepository = new RoleRepository();
+$tenantService = new TenantService(
+    $tenantRepository,
+    $auditLogRepository,
+    (string) Application::getInstance()->config('app.timezone', 'America/Sao_Paulo'),
+);
 
 $router->use(static fn (callable $next): array => (new CsrfMiddleware($session))->handle($next));
 
@@ -167,19 +177,19 @@ $router->delete('/api/v1/roles/{id}', static fn (int $id): array => (new RoleApi
 	$permission('users.manage'),
 ]);
 
-$router->get('/usuarios', static fn (): array => (new UserController($userService, $roleService, $authService, $session))->index(), [
+$router->get('/usuarios', static fn (): array => (new UserController($userService, $roleService, $tenantService, $authService, $session))->index(), [
 	$auth,
 	$permission('users.view'),
 ]);
-$router->get('/usuarios/{id}', static fn (int $id): array => (new UserController($userService, $roleService, $authService, $session))->show($id), [
+$router->get('/usuarios/{id}', static fn (int $id): array => (new UserController($userService, $roleService, $tenantService, $authService, $session))->show($id), [
 	$auth,
 	$permission('users.view'),
 ]);
-$router->post('/usuarios/{id}/bloquear', static fn (int $id): array => (new UserController($userService, $roleService, $authService, $session))->block($id), [
+$router->post('/usuarios/{id}/bloquear', static fn (int $id): array => (new UserController($userService, $roleService, $tenantService, $authService, $session))->block($id), [
 	$auth,
 	$permission('users.manage'),
 ]);
-$router->post('/usuarios/{id}/ativar', static fn (int $id): array => (new UserController($userService, $roleService, $authService, $session))->activate($id), [
+$router->post('/usuarios/{id}/ativar', static fn (int $id): array => (new UserController($userService, $roleService, $tenantService, $authService, $session))->activate($id), [
 	$auth,
 	$permission('users.manage'),
 ]);
@@ -194,4 +204,12 @@ $router->get('/perfis/{id}', static fn (int $id): array => (new RoleController($
 $router->post('/perfis/{id}/permissoes', static fn (int $id): array => (new RoleController($roleService, $authService, $session))->updatePermissions($id), [
 	$auth,
 	$permission('users.manage'),
+]);
+$router->get('/configuracoes', static fn (): array => (new TenantController($tenantService, $authService, $session))->edit(), [
+	$auth,
+	$permission('settings.manage'),
+]);
+$router->post('/configuracoes', static fn (): array => (new TenantController($tenantService, $authService, $session))->update(), [
+	$auth,
+	$permission('settings.manage'),
 ]);

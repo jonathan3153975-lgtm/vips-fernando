@@ -3,6 +3,7 @@
 /** @var list<array<string, mixed>> $roles */
 /** @var string $csrfField */
 /** @var bool $canManageUsers */
+/** @var \App\Support\TenantFormatter $formatter */
 
 $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 $activeNav = 'users';
@@ -61,7 +62,7 @@ $activeNav = 'users';
                                     <?= $row['status'] === 'ACTIVE' ? 'Ativo' : 'Inativo' ?>
                                 </span>
                             </td>
-                            <td class="muted"><?= $row['last_login'] ? $e($row['last_login']) : 'nunca' ?></td>
+                            <td class="muted"><?= $row['last_login'] ? $e($formatter->date($row['last_login'], true)) : 'nunca' ?></td>
                             <td class="row">
                                 <?php if ($canManageUsers): ?>
                                     <form method="post" action="/usuarios/<?= (int) $row['id'] ?>/<?= $row['status'] === 'ACTIVE' ? 'bloquear' : 'ativar' ?>">

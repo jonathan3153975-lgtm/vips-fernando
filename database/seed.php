@@ -37,6 +37,7 @@ $permissions = [
     'financial.manage',
     'users.view',
     'users.manage',
+    'settings.manage',
 ];
 
 $pdo->beginTransaction();
