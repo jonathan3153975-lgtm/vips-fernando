@@ -144,17 +144,21 @@ final class ProductRepository
     {
         $statement = $this->pdo()->prepare(
             'INSERT INTO stock (tenant_id, product_id, quantity, reserved_quantity, minimum_quantity, updated_at)
-             VALUES (:tenant_id, :product_id, 0, 0, 0, :updated_at)'
+             SELECT :tenant_id, :product_id, 0, 0, 0, :updated_at
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM stock WHERE tenant_id = :tenant_id_check AND product_id = :product_id_check
+             )'
         );
 
-        try {
-            $statement->execute([
-                'tenant_id' => $tenantId,
-                'product_id' => $productId,
-                'updated_at' => date('Y-m-d H:i:s'),
-            ]);
-        } catch (\Throwable) {
-        }
+        $timestamp = date('Y-m-d H:i:s');
+
+        $statement->execute([
+            'tenant_id' => $tenantId,
+            'product_id' => $productId,
+            'updated_at' => $timestamp,
+            'tenant_id_check' => $tenantId,
+            'product_id_check' => $productId,
+        ]);
     }
 
     private function upsertPrice(int $productId, array $price): void

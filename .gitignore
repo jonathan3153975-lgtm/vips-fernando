@@ -1,9 +1,11 @@
 /vendor/
 /.env
 /.phpunit.result.cache
+/.phpunit.cache/
 /storage/logs/*.log
 /storage/cache/*
-/public/uploads/*
+/public/uploads/
+/database/*.sql
 !/public/uploads/.gitignore
 !/storage/cache/.gitignore
 !/storage/logs/.gitignore

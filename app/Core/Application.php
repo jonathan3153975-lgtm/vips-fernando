@@ -75,9 +75,13 @@ final class Application
 
     private function renderException(Throwable $throwable): void
     {
+        $debug = (bool) $this->config('app.debug', false);
+
+        Logger::exception($throwable);
+
         http_response_code(500);
 
-        $message = $this->config('app.debug', false)
+        $message = $debug
             ? $throwable->getMessage()
             : 'Erro interno do servidor.';
 

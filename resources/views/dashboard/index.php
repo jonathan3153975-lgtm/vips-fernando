@@ -51,6 +51,7 @@
             <strong><?= htmlspecialchars((string) ($user['tenant_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?></strong>
         </div>
         <form method="post" action="/logout">
+            <?= $csrfField ?>
             <button type="submit">Sair</button>
         </form>
     </header>

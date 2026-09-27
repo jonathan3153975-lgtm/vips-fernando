@@ -7,6 +7,7 @@ namespace Tests\Integration;
 use App\Core\Application;
 use App\Core\Database;
 use App\Core\Router;
+use App\Core\Session;
 use PDO;
 use PHPUnit\Framework\TestCase;
 
@@ -35,6 +36,8 @@ abstract class ApiIntegrationTestCase extends TestCase
         $_SERVER['APP_TIMEZONE'] = $_ENV['APP_TIMEZONE'];
         $_SERVER['DB_CONNECTION'] = $_ENV['DB_CONNECTION'];
         $_SERVER['DB_DATABASE'] = $_ENV['DB_DATABASE'];
+
+        unset($_SERVER['HTTP_REFERER'], $_SERVER['HTTP_X_CSRF_TOKEN']);
 
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_unset();
@@ -73,11 +76,50 @@ abstract class ApiIntegrationTestCase extends TestCase
         $_SERVER['CONTENT_TYPE'] = 'application/json';
         $_SERVER['__BODY__'] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
 
-        new Application($this->config(), dirname(__DIR__, 2) . '/routes/web.php');
+        return $this->dispatch();
+    }
+
+    protected function dispatchForm(string $method, string $uri, array $form = []): array
+    {
+        $_POST = $form;
+        $_SERVER['REQUEST_METHOD'] = strtoupper($method);
+        $_SERVER['REQUEST_URI'] = $uri;
+        $_SERVER['CONTENT_TYPE'] = 'application/x-www-form-urlencoded';
+        unset($_SERVER['__BODY__']);
+
+        return $this->dispatch();
+    }
+
+    protected function csrfToken(): string
+    {
+        (new Session())->touch();
+
+        return (new Session())->token();
+    }
+
+    /**
+     * Reconstroi a aplicacao com uma configuracao de banco alternativa e
+     * despacha a rota, sem alterar a configuracao usada pelos demais testes.
+     */
+    protected function dispatchWithDatabaseConfig(array $database, string $method, string $uri): array
+    {
+        $config = $this->config();
+        $config['database'] = $database;
+
+        new Application($config, dirname(__DIR__, 2) . '/routes/web.php');
         $router = new Router();
         require dirname(__DIR__, 2) . '/routes/web.php';
 
         return $router->dispatch(strtoupper($method), $uri);
+    }
+
+    private function dispatch(): array
+    {
+        new Application($this->config(), dirname(__DIR__, 2) . '/routes/web.php');
+        $router = new Router();
+        require dirname(__DIR__, 2) . '/routes/web.php';
+
+        return $router->dispatch(strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')), (string) ($_SERVER['REQUEST_URI'] ?? '/'));
     }
 
     protected function responseJson(array $response): array

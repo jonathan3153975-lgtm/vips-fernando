@@ -34,7 +34,24 @@ final class Request
         return is_string($path) && str_starts_with($path, '/api/');
     }
 
-    private static function rawBody(): string
+    public static function isJson(): bool
+    {
+        $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? ''));
+
+        return str_contains($contentType, 'application/json');
+    }
+
+    public static function method(): string
+    {
+        return strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    }
+
+    public static function isUnsafeMethod(): bool
+    {
+        return in_array(self::method(), ['POST', 'PUT', 'PATCH', 'DELETE'], true);
+    }
+
+    public static function rawBody(): string
     {
         return (string) ($_SERVER['__BODY__'] ?? file_get_contents('php://input'));
     }

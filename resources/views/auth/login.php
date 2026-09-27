@@ -106,6 +106,8 @@
             <?php endif; ?>
 
             <form method="post" action="/login">
+                <?= $csrfField ?>
+
                 <div class="field">
                     <label for="email">Email</label>
                     <input id="email" name="email" type="email" value="<?= htmlspecialchars((string) $oldEmail, ENT_QUOTES, 'UTF-8') ?>" required>

@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(\PDO $pdo): void
     {
         $pdo->exec(
-            'CREATE TABLE categories (
+            'CREATE TABLE IF NOT EXISTS categories (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 parent_id BIGINT UNSIGNED NULL,
@@ -24,7 +24,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE brands (
+            'CREATE TABLE IF NOT EXISTS brands (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 name VARCHAR(100) NOT NULL,
@@ -36,7 +36,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE products (
+            'CREATE TABLE IF NOT EXISTS products (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 category_id BIGINT UNSIGNED NULL,
@@ -61,7 +61,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE product_prices (
+            'CREATE TABLE IF NOT EXISTS product_prices (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 product_id BIGINT UNSIGNED NOT NULL,
                 cost_price DECIMAL(14,2) NOT NULL DEFAULT 0.00,
@@ -76,7 +76,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE stock (
+            'CREATE TABLE IF NOT EXISTS stock (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 product_id BIGINT UNSIGNED NOT NULL,
@@ -91,7 +91,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE stock_movements (
+            'CREATE TABLE IF NOT EXISTS stock_movements (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 product_id BIGINT UNSIGNED NOT NULL,

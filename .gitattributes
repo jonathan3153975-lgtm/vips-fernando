@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+*.php text diff=php
+*.md text diff=markdown
+*.yml text
+*.yaml text
+*.json text
+*.neon text
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary

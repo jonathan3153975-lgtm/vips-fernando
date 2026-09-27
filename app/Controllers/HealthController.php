@@ -16,6 +16,8 @@ final class HealthController extends Controller
 
     public function show(): array
     {
-        return $this->json($this->healthService->status());
+        $status = $this->healthService->status();
+
+        return $this->json($status, $status['status'] === 'ok' ? 200 : 503);
     }
 }

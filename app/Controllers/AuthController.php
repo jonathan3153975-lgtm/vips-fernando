@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Controller;
+use App\Core\Csrf;
 use App\Core\ResponseFactory;
 use App\Core\Session;
 use App\Services\AuthService;
@@ -22,6 +23,7 @@ final class AuthController extends Controller
         return $this->view('auth/login', [
             'error' => $this->session->pull('auth_error'),
             'oldEmail' => $this->session->pull('old_email', ''),
+            'csrfField' => Csrf::field($this->session),
         ]);
     }
 

@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(\PDO $pdo): void
     {
         $pdo->exec(
-            'CREATE TABLE financial_categories (
+            'CREATE TABLE IF NOT EXISTS financial_categories (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 type VARCHAR(30) NOT NULL,
@@ -23,7 +23,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE financial_transactions (
+            'CREATE TABLE IF NOT EXISTS financial_transactions (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 category_id BIGINT UNSIGNED NOT NULL,
@@ -45,7 +45,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE accounts_receivable (
+            'CREATE TABLE IF NOT EXISTS accounts_receivable (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 customer_id BIGINT UNSIGNED NULL,
@@ -65,7 +65,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE accounts_payable (
+            'CREATE TABLE IF NOT EXISTS accounts_payable (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 supplier_id BIGINT UNSIGNED NULL,
@@ -85,7 +85,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE cash_flow (
+            'CREATE TABLE IF NOT EXISTS cash_flow (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 reference_date DATE NOT NULL,

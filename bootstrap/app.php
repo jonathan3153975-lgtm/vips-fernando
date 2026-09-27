@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Core\Application;
+use App\Core\Logger;
+use App\Core\Session;
 use Dotenv\Dotenv;
 
 require_once dirname(__DIR__) . '/vendor/autoload.php';
@@ -25,15 +27,38 @@ $config = [
 
 date_default_timezone_set($config['app']['timezone']);
 
+$sessionConfig = $config['app']['session'];
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_name($config['app']['session']['cookie']);
+    session_name($sessionConfig['cookie']);
     session_set_cookie_params([
-        'lifetime' => $config['app']['session']['lifetime'] * 60,
+        'lifetime' => $sessionConfig['lifetime'] * 60,
         'path' => '/',
-        'httponly' => true,
-        'samesite' => 'Lax',
+        'secure' => $sessionConfig['secure'],
+        'httponly' => $sessionConfig['httponly'],
+        'samesite' => $sessionConfig['samesite'],
     ]);
     session_start();
+}
+
+$session = new Session();
+
+if ($session->isIdleExpired($sessionConfig['idle_timeout'])) {
+    Logger::info('Sessao encerrada por inatividade.', ['path' => $_SERVER['REQUEST_URI'] ?? '/']);
+    $session->invalidate();
+    $session->put('_flash', ['auth_error' => 'Sua sessao expirou por inatividade. Entre novamente.']);
+}
+
+$session->touch();
+
+if ($config['app']['env'] === 'production') {
+    header('X-Frame-Options: SAMEORIGIN');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+
+    if ($sessionConfig['secure']) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
 }
 
 return new Application(

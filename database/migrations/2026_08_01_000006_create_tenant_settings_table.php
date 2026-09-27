@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(\PDO $pdo): void
     {
         $pdo->exec(
-            'CREATE TABLE tenant_settings (
+            'CREATE TABLE IF NOT EXISTS tenant_settings (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 currency VARCHAR(10) NOT NULL DEFAULT "BRL",

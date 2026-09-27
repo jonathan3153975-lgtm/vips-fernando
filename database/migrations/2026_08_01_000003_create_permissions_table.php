@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(\PDO $pdo): void
     {
         $pdo->exec(
-            'CREATE TABLE permissions (
+            'CREATE TABLE IF NOT EXISTS permissions (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(150) NOT NULL,
                 description TEXT NULL,

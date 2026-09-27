@@ -5,6 +5,7 @@
   "license": "proprietary",
   "require": {
     "php": "^8.3",
+    "ext-mbstring": "*",
     "ext-pdo": "*",
     "vlucas/phpdotenv": "^5.6"
   },
@@ -25,7 +26,10 @@
   "scripts": {
     "serve": "php -S localhost:8000 -t public public/index.php",
     "test": "phpunit",
+    "lint": "php tools/lint.php",
     "migrate": "php database/migrate.php",
+    "migrate:rollback": "php database/rollback.php",
+    "migrate:fresh": "php database/fresh.php",
     "seed": "php database/seed.php"
   },
   "config": {

@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(\PDO $pdo): void
     {
         $pdo->exec(
-            'CREATE TABLE password_resets (
+            'CREATE TABLE IF NOT EXISTS password_resets (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 user_id BIGINT UNSIGNED NOT NULL,
                 token VARCHAR(255) NOT NULL,

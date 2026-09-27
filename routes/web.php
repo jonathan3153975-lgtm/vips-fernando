@@ -11,6 +11,7 @@ use App\Controllers\DashboardController;
 use App\Controllers\HealthController;
 use App\Controllers\HomeController;
 use App\Middlewares\AuthMiddleware;
+use App\Middlewares\CsrfMiddleware;
 use App\Middlewares\GuestMiddleware;
 use App\Middlewares\PermissionMiddleware;
 use App\Repositories\AuditLogRepository;
@@ -35,6 +36,8 @@ $passwordResetService = new PasswordResetService($userRepository, new PasswordRe
 $importService = new ImportService(new ImportRepository(), $auditLogRepository);
 $productService = new ProductService(new ProductRepository(), $auditLogRepository);
 
+$router->use(static fn (callable $next): array => (new CsrfMiddleware($session))->handle($next));
+
 $guest = static fn (callable $next): array => (new GuestMiddleware($authService))->handle($next);
 $auth = static fn (callable $next): array => (new AuthMiddleware($authService))->handle($next);
 $permission = static fn (string $name): callable => static fn (callable $next): array => (new PermissionMiddleware($authService, $name))->handle($next);
@@ -43,7 +46,7 @@ $router->get('/login', static fn (): array => (new AuthController($authService, 
 $router->post('/login', static fn (): array => (new AuthController($authService, $session))->store(), [$guest]);
 $router->post('/logout', static fn (): array => (new AuthController($authService, $session))->destroy(), [$auth]);
 
-$router->get('/dashboard', static fn (): array => (new DashboardController($authService))->index(), [
+$router->get('/dashboard', static fn (): array => (new DashboardController($authService, $session))->index(), [
 	$auth,
 	$permission('dashboard.view'),
 ]);

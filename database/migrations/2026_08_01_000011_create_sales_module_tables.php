@@ -8,7 +8,7 @@ return new class extends Migration {
     public function up(\PDO $pdo): void
     {
         $pdo->exec(
-            'CREATE TABLE customers (
+            'CREATE TABLE IF NOT EXISTS customers (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 name VARCHAR(150) NOT NULL,
@@ -27,7 +27,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE sales (
+            'CREATE TABLE IF NOT EXISTS sales (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 tenant_id BIGINT UNSIGNED NOT NULL,
                 customer_id BIGINT UNSIGNED NULL,
@@ -53,7 +53,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE sale_items (
+            'CREATE TABLE IF NOT EXISTS sale_items (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 sale_id BIGINT UNSIGNED NOT NULL,
                 product_id BIGINT UNSIGNED NOT NULL,
@@ -71,7 +71,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE sale_discounts (
+            'CREATE TABLE IF NOT EXISTS sale_discounts (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 sale_id BIGINT UNSIGNED NOT NULL,
                 type VARCHAR(30) NOT NULL,
@@ -85,7 +85,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE payments (
+            'CREATE TABLE IF NOT EXISTS payments (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 sale_id BIGINT UNSIGNED NOT NULL,
                 method VARCHAR(50) NOT NULL,
@@ -101,7 +101,7 @@ return new class extends Migration {
         );
 
         $pdo->exec(
-            'CREATE TABLE sale_returns (
+            'CREATE TABLE IF NOT EXISTS sale_returns (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 sale_id BIGINT UNSIGNED NOT NULL,
                 customer_id BIGINT UNSIGNED NULL,

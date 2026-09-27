@@ -9,9 +9,14 @@ use RuntimeException;
 final class Router
 {
     /**
-    * @var array<string, list<array{path: string, regex: string, parameterNames: list<string>, handler: callable, middleware: list<callable>}>>
+     * @var array<string, list<array{path: string, regex: string, parameterNames: list<string>, handler: callable, middleware: list<callable>}>>
      */
     private array $routes = [];
+
+    /**
+     * @var list<callable>
+     */
+    private array $globalMiddleware = [];
 
     public function get(string $path, callable $handler, array $middleware = []): void
     {
@@ -26,6 +31,21 @@ final class Router
     public function put(string $path, callable $handler, array $middleware = []): void
     {
         $this->map('PUT', $path, $handler, $middleware);
+    }
+
+    public function patch(string $path, callable $handler, array $middleware = []): void
+    {
+        $this->map('PATCH', $path, $handler, $middleware);
+    }
+
+    public function delete(string $path, callable $handler, array $middleware = []): void
+    {
+        $this->map('DELETE', $path, $handler, $middleware);
+    }
+
+    public function use(callable $middleware): void
+    {
+        $this->globalMiddleware[] = $middleware;
     }
 
     public function dispatch(string $method, string $path): array
@@ -47,7 +67,11 @@ final class Router
             ];
         }
 
-        $response = $this->runPipeline($route['handler'], $route['middleware'], $route['parameters']);
+        $response = $this->runPipeline(
+            $route['handler'],
+            array_merge($this->globalMiddleware, $route['middleware']),
+            $route['parameters'],
+        );
 
         if (!is_array($response) || !isset($response['status'], $response['headers'], $response['body'])) {
             throw new RuntimeException('Handler retornou resposta invalida.');
