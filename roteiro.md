@@ -113,14 +113,45 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 **Objetivo:** completar o controle de acesso e fazer o isolamento multi-tenant ser uma garantia da arquitetura, não uma disciplina manual.
 
 ### 2.1 Gestão de usuários, perfis e permissões (EPIC 02)
-- [ ] `P1` `UserRepository`: listar, buscar, criar, atualizar, bloquear/desativar — sempre com `tenant_id`.
-- [ ] `P1` `UserService`: validação de e-mail único por tenant, hash de senha, impossível bloquear o último admin ativo.
-- [ ] `P1` `RoleService`: CRUD de perfis e de suas permissões (`role_permissions`).
-- [ ] `P1` API: `GET/POST /api/v1/users`, `GET/PUT /api/v1/users/{id}`, `GET/POST /api/v1/roles`, `PUT /api/v1/roles/{id}/permissions`.
-- [ ] `P1` Telas server-rendered de usuários e perfis, com menu lateral.
-- [ ] `P1` Aplicar as permissões já semeadas e hoje sem uso: `users.view`, `users.manage`, `stock.adjust`, `customers.*`, `sales.*`, `financial.*`.
+- [x] `P1` `UserRepository`: listar, buscar, criar, atualizar, bloquear/desativar — sempre com `tenant_id`.
+- [x] `P1` `UserService`: validação de e-mail único por tenant, hash de senha, impossível bloquear o último admin ativo.
+- [x] `P1` `RoleService`: CRUD de perfis e de suas permissões (`role_permissions`).
+- [x] `P1` API: `GET/POST /api/v1/users`, `GET/PUT /api/v1/users/{id}`, `GET/POST /api/v1/roles`, `PUT /api/v1/roles/{id}/permissions`.
+- [x] `P1` Telas server-rendered de usuários e perfis, com menu lateral.
+- [x] `P1` Aplicar as permissões já semeadas e hoje sem uso: `users.view`, `users.manage`, `stock.adjust`, `customers.*`, `sales.*`, `financial.*`.
 - [ ] `P2` Rate limit de tentativas de login e bloqueio progressivo.
 - [ ] `P2` Política de senha forte e 2FA (fora do escopo do MVP, já previsto na baseline).
+
+**Implementado:**
+- `UserRepository` (CRUD tenant-scoped, `findByEmail` pré-auth, troca de senha, status, `last_login_at`) e `RoleRepository` (CRUD + `replacePermissions` em transação). Ambos estendem `TenantScopedRepository`, então o tenant vem da sessão e nenhuma query pode rodar sem o marcador `:tenant_id`.
+- `PermissionRepository` é o único global: `permissions` é catálogo de todo o SaaS, sem `tenant_id` por decisão de modelagem. Usa `BaseRepository` diretamente.
+- `UserService` valida e-mail, senha (mínimo de 8 caracteres), perfil pertencente ao tenant e a invariante do último administrador ativo — contagem derivada de quem possui `users.manage`, não de nome de perfil.
+- `RoleService` protege o perfil do sistema (não pode ser excluído, mas pode ter permissões editadas), recusa excluir perfil com usuários, e recusa remover `users.manage` do único perfil que a concede.
+- Tudo é validado **antes** de qualquer escrita. `RoleService::create()` e `update()` calculam e checam permissões primeiro, para uma requisição inválida não deixar perfil órfão nem metadados já alterados.
+- `RoleRepository::replacePermissions()` roda DELETE + INSERT dentro de uma transação: falhar no meio não pode deixar o perfil sem nenhuma permissão.
+- APIs em `UserApiController`/`RoleApiController` e telas em `UserController`/`RoleController` + views de `users/` e `roles/`.
+- Erros de domínio viram 400, e o RBAC é aplicado por `PermissionMiddleware` usando `users.view` para leitura e `users.manage` para escrita.
+- Formulários nativos postam em rotas web (`POST /usuarios/{id}/bloquear`, `/usuarios/{id}/ativar`, `/perfis/{id}/permissoes`) e redirecionam com flash (PRG). **Não podem postar em `/api/`:** rotas de API só aceitam `application/json` e o `CsrfMiddleware` responde 415 a um form nativo.
+
+**Dois bugs reais encontrados ao validar de ponta a ponta:**
+- **`Request::all()` descartava formulários web.** A condição era `content-type é JSON || corpo não vazio`; um form nativo sempre tem corpo, então caía no `json_decode`, falhava e devolvia `[]` — o `$_POST` nunca era consultado. No CLI `php://input` é vazio, então a suíte passava por um caminho que o servidor real nunca percorre. Agora `application/json` faz decode do corpo, e qualquer outro content-type usa `$_POST`.
+- **`RoleService::create()` validava permissões depois de criar o perfil**, deixando um perfil órfão quando a requisição trazia permissão inexistente. `create()` e `update()` passaram a validar tudo antes de escrever, e `RoleRepository::replacePermissions()` passou a rodar DELETE + INSERT em transação.
+
+**Desvios do roteiro, com motivo:**
+- **E-mail único é global, não por tenant.** `users.email` tem `uq_users_email`. O roteiro pede unicidade por tenant, mas o login resolve o tenant **a partir do e-mail** (`findByEmail` antes da sessão existir); com índice composto o login ficaria ambíguo. Manter o índice global e remover a checagem duplicada em `UserService::create()` é o que permite um e-mail continuar identificando uma única empresa. A migração para `(tenant_id, email)` depende do fluxo de troca de tenant e está prevista para a Etapa 2.3.
+- Os 5 perfis do seed real têm `is_system = 1`. Passam a ser "perfis do sistema": não excluíveis, mas com permissões editáveis.
+
+**Validação:**
+- `tests/Integration/UserManagementTest.php` (30 testes) e `tests/Integration/RoleManagementTest.php` (26 testes) cobrem isolamento entre tenants, invariantes de administrador, RBAC, unicidade de nome por tenant, catálogo de permissões, formulários web e telas. Suíte completa: **85 testes / 338 asserções**, verde.
+- `composer lint` verde em 81 arquivos.
+- Probe no MySQL real: 32/32 verificações, incluindo a repetição de todos os caminhos com `PDO::ATTR_EMULATE_PREPARES = false`. Isso foi necessário porque o projeto usa *emulated prepares* (o mesmo SQL usa `:tenant_id` duas vezes em `role_permissions`), e *native prepares* rejeitam placeholders repetidos com `SQLSTATE[HY093]`. Nenhuma query nova depende da emulação.
+- Smoke HTTP com `php -S` e cookie jar, exercising o navegador de verdade: 27/27 verificações de login, páginas, POST de formulário com token CSRF lido do HTML, limpeza de permissões, bloqueio do último admin e rejeição de payload não-JSON na API. **A suíte PHPUnit não substitui este smoke:** foi ele que expôs o bug do `Request::all()`, porque no CLI `php://input` é vazio.
+
+**Limitações conhecidas:**
+- A unicidade global de e-mail ainda permite enumeração de contas entre tenants: o `UserService` responde "e-mail já está em uso" para um endereço existente em outra empresa.
+- `roles.tenant_id` é nullable no schema, mas o CRUD exige tenant; linhas globais não têm caminho de escrita hoje.
+- As telas cobrem listagem, detalhe, bloqueio/ativação e edição de permissões. Criar usuário, editar perfil e excluir perfil existem só via API.
+
 
 ### 2.2 Recuperação de senha (EPIC 02 — fluxo hoje incompleto)
 > Hoje `PasswordResetService::request()` gera o token, mas **nada é enviado e não existe rota de redefinição**. O fluxo morre no passo 1.
@@ -133,6 +164,9 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 ### 2.3 Tenant e configurações (EPIC 03)
 > Hoje `tenant_settings` é criada e populada pelo seed, mas **nunca é lida pelo código**.
 
+> **Achado da 2.1:** a tabela `tenants` só tem a chave primária — **nenhum índice único**. O `ON DUPLICATE KEY UPDATE` do seed nunca dispara, então cada `composer seed` insere "Tenant Demo" de novo (foi assim que apareceram os tenants #901–#904). Sem unique em `document` e `email`, duas empresas podem registrar o mesmo CNPJ. Precisa de migration, e a limpeza dos duplicados vai junto.
+
+- [ ] `P1` Migration com `UNIQUE` em `tenants.document` e `tenants.email`, após remover duplicados.
 - [ ] `P1` `TenantRepository` + `TenantService`: cadastro, leitura e atualização de `tenant_settings`.
 - [ ] `P1` `TenantContext`: resolver `tenant_id` ativo na sessão e expor moeda, timezone e formato de data para as views.
 - [ ] `P1` Fazer `APP_TIMEZONE` e o formato de data refletirem o tenant, não o global.

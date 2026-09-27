@@ -16,4 +16,17 @@ abstract class BaseRepository
 
         return Database::connect($app->config('database'));
     }
+
+    /**
+     * @param array<string, mixed> $bindings
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function selectAll(string $sql, array $bindings = []): array
+    {
+        $statement = $this->pdo()->prepare($sql);
+        $statement->execute($bindings);
+
+        return $statement->fetchAll() ?: [];
+    }
 }

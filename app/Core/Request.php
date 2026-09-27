@@ -9,15 +9,25 @@ final class Request
     public static function all(): array
     {
         $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? ''));
-        $body = self::rawBody();
 
-        if (str_contains($contentType, 'application/json') || $body !== '') {
-            $decoded = json_decode($body, true);
+        if (str_contains($contentType, 'application/json')) {
+            $decoded = json_decode(self::rawBody(), true);
 
             return is_array($decoded) ? $decoded : [];
         }
 
-        return $_POST;
+        // application/x-www-form-urlencoded e multipart: o PHP ja populou
+        // $_POST. Nao se pode tentar json_decode do corpo nesses casos: um form
+        // nativo sempre tem corpo, o decode falharia e o POST inteiro seria
+        // descartado como [].
+        if ($_POST !== []) {
+            return $_POST;
+        }
+
+        // Sem campos parseados, ainda pode ser JSON sem content-type correto.
+        $decoded = json_decode(self::rawBody(), true);
+
+        return is_array($decoded) ? $decoded : [];
     }
 
     public static function input(string $key, mixed $default = null): mixed

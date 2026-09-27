@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Integration;
 
 use App\Core\Application;
+use App\Core\Csrf;
 use App\Core\Database;
 use App\Core\Router;
 use App\Core\Session;
@@ -90,9 +91,50 @@ abstract class ApiIntegrationTestCase extends TestCase
         return $this->dispatch();
     }
 
-    protected function csrfToken(): string
+    /**
+     * Requisicao de pagina (sem payload), usada para conferir as telas
+     * server-rendered.
+     */
+    protected function dispatchPage(string $method, string $uri): array
     {
-        (new Session())->touch();
+        $_POST = [];
+        $_SERVER['REQUEST_METHOD'] = strtoupper($method);
+        $_SERVER['REQUEST_URI'] = $uri;
+        unset($_SERVER['CONTENT_TYPE'], $_SERVER['__BODY__'], $_SERVER['HTTP_REFERER'], $_SERVER['HTTP_X_CSRF_TOKEN']);
+
+        return $this->dispatch();
+    }
+
+    /**
+     * POST de formulario nativo: x-www-form-urlencoded + token CSRF, como o
+     * navegador faz. Rotas /api/ rejeitam esse content-type com 415, entao
+     * exercita as rotas web.
+     */
+    protected function dispatchUserForm(string $method, string $uri, array $form = []): array
+    {
+        return $this->dispatchForm($method, $uri, [Csrf::FIELD_NAME => $this->csrfToken()] + $form);
+    }
+
+    /**
+     * Igual a dispatchUserForm, mas com o corpo urlencoded preenchido, como o
+     * SAPI real faz. Sem isso php://input fica vazio no CLI e o teste passa
+     * por um caminho que o servidor nunca percorre.
+     */
+    protected function dispatchNativeForm(string $method, string $uri, array $form = []): array
+    {
+        $form = [Csrf::FIELD_NAME => $this->csrfToken()] + $form;
+
+        $_POST = $form;
+        $_SERVER['REQUEST_METHOD'] = strtoupper($method);
+        $_SERVER['REQUEST_URI'] = $uri;
+        $_SERVER['CONTENT_TYPE'] = 'application/x-www-form-urlencoded';
+        $_SERVER['__BODY__'] = http_build_query($form);
+
+        return $this->dispatch();
+    }
+
+    protected function csrfToken(): string
+    {        (new Session())->touch();
 
         return (new Session())->token();
     }
@@ -113,7 +155,7 @@ abstract class ApiIntegrationTestCase extends TestCase
         return $router->dispatch(strtoupper($method), $uri);
     }
 
-    private function dispatch(): array
+    protected function dispatch(): array
     {
         new Application($this->config(), dirname(__DIR__, 2) . '/routes/web.php');
         $router = new Router();
@@ -203,6 +245,8 @@ abstract class ApiIntegrationTestCase extends TestCase
             6 => 'products.create',
             7 => 'products.edit',
             8 => 'stock.view',
+            9 => 'users.view',
+            10 => 'users.manage',
         ];
 
         foreach ($permissions as $id => $name) {
@@ -216,7 +260,10 @@ abstract class ApiIntegrationTestCase extends TestCase
             ]);
         }
 
-        foreach ([[1,1],[1,2],[1,3],[1,4],[1,5],[1,6],[1,7],[1,8],[2,2],[3,1],[3,2],[3,3],[3,4],[3,5],[3,6],[3,7],[3,8]] as [$roleId, $permissionId]) {
+        // viewer (role 2) fica restrito a imports.view, para exercitar o 403.
+        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10]];
+
+        foreach ($grants as [$roleId, $permissionId]) {
             $statement = $pdo->prepare('INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (:role_id, :permission_id, :created_at)');
             $statement->execute([
                 'role_id' => $roleId,

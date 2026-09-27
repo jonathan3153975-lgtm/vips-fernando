@@ -129,14 +129,14 @@ final class CrossTenantTest extends ApiIntegrationTestCase
         self::assertSame([], $payload['data']);
     }
 
-    public function testFindByIdDoesNotReturnUserOfAnotherTenant(): void
+    public function testFindDoesNotReturnUserOfAnotherTenant(): void
     {
         $this->loginAs('admin1@example.com');
 
         $users = new UserRepository();
 
-        self::assertNotNull($users->findById(1), 'Usuario do proprio tenant deve ser encontrado.');
-        self::assertNull($users->findById(3), 'Usuario de outro tenant nao pode ser encontrado.');
+        self::assertNotNull($users->find(1), 'Usuario do proprio tenant deve ser encontrado.');
+        self::assertNull($users->find(3), 'Usuario de outro tenant nao pode ser encontrado.');
     }
 
     public function testPermissionsCannotBeReadForUserOfAnotherTenant(): void
