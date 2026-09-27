@@ -4,23 +4,58 @@ declare(strict_types=1);
 
 namespace App\Repositories;
 
-use App\Core\Application;
-use App\Core\Database;
-
-final class AuditLogRepository
+final class AuditLogRepository extends TenantScopedRepository
 {
+    /**
+     * @param array<string, mixed> $metadata
+     */
     public function create(
-        ?int $tenantId,
-        ?int $userId,
         string $action,
         string $entityType,
         ?int $entityId,
-        array $metadata = []
+        array $metadata = [],
+        ?int $userId = null,
     ): void {
-        $app = Application::getInstance();
-        $pdo = Database::connect($app->config('database'));
+        $this->write(
+            $this->tenantId(),
+            $userId ?? $this->userId(),
+            $action,
+            $entityType,
+            $entityId,
+            $metadata,
+        );
+    }
 
-        $statement = $pdo->prepare(
+    /**
+     * Eventos anteriores a autenticacao, em que ainda nao existe tenant na
+     * sessao. O tenant vem do usuario localizado no proprio banco, nunca da
+     * requisicao. Escrita apenas; nenhuma leitura usa esta via.
+     *
+     * @param array<string, mixed> $metadata
+     */
+    public function createForTenant(
+        int $tenantId,
+        int $userId,
+        string $action,
+        string $entityType,
+        ?int $entityId,
+        array $metadata = [],
+    ): void {
+        $this->write($tenantId, $userId, $action, $entityType, $entityId, $metadata);
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function write(
+        int $tenantId,
+        int $userId,
+        string $action,
+        string $entityType,
+        ?int $entityId,
+        array $metadata,
+    ): void {
+        $statement = $this->pdo()->prepare(
             'INSERT INTO audit_logs (
                 tenant_id,
                 user_id,

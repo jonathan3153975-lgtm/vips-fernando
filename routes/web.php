@@ -55,44 +55,44 @@ $router->post('/api/v1/auth/login', static fn (): array => (new AuthApiControlle
 $router->post('/api/v1/auth/logout', static fn (): array => (new AuthApiController($authService, $passwordResetService))->logout(), [$auth]);
 $router->post('/api/v1/auth/password-reset', static fn (): array => (new AuthApiController($authService, $passwordResetService))->passwordReset(), [$guest]);
 
-$router->get('/api/v1/imports', static fn (): array => (new ImportApiController($authService, $importService))->index(), [
+$router->get('/api/v1/imports', static fn (): array => (new ImportApiController($importService))->index(), [
 	$auth,
 	$permission('imports.view'),
 ]);
-$router->post('/api/v1/imports', static fn (): array => (new ImportApiController($authService, $importService))->store(), [
+$router->post('/api/v1/imports', static fn (): array => (new ImportApiController($importService))->store(), [
 	$auth,
 	$permission('imports.create'),
 ]);
-$router->put('/api/v1/imports/{id}', static fn (int $id): array => (new ImportApiController($authService, $importService))->update($id), [
+$router->put('/api/v1/imports/{id}', static fn (int $id): array => (new ImportApiController($importService))->update($id), [
 	$auth,
 	$permission('imports.create'),
 ]);
-$router->post('/api/v1/imports/{id}/expenses', static fn (int $id): array => (new ImportApiController($authService, $importService))->storeExpense($id), [
+$router->post('/api/v1/imports/{id}/expenses', static fn (int $id): array => (new ImportApiController($importService))->storeExpense($id), [
 	$auth,
 	$permission('imports.create'),
 ]);
-$router->post('/api/v1/imports/{id}/items', static fn (int $id): array => (new ImportApiController($authService, $importService))->storeItem($id), [
+$router->post('/api/v1/imports/{id}/items', static fn (int $id): array => (new ImportApiController($importService))->storeItem($id), [
 	$auth,
 	$permission('imports.create'),
 ]);
-$router->post('/api/v1/imports/{id}/complete', static fn (int $id): array => (new ImportApiController($authService, $importService))->complete($id), [
+$router->post('/api/v1/imports/{id}/complete', static fn (int $id): array => (new ImportApiController($importService))->complete($id), [
 	$auth,
 	$permission('imports.complete'),
 ]);
 
-$router->get('/api/v1/products', static fn (): array => (new ProductApiController($authService, $productService))->index(), [
+$router->get('/api/v1/products', static fn (): array => (new ProductApiController($productService))->index(), [
 	$auth,
 	$permission('products.view'),
 ]);
-$router->post('/api/v1/products', static fn (): array => (new ProductApiController($authService, $productService))->store(), [
+$router->post('/api/v1/products', static fn (): array => (new ProductApiController($productService))->store(), [
 	$auth,
 	$permission('products.create'),
 ]);
-$router->put('/api/v1/products/{id}', static fn (int $id): array => (new ProductApiController($authService, $productService))->update($id), [
+$router->put('/api/v1/products/{id}', static fn (int $id): array => (new ProductApiController($productService))->update($id), [
 	$auth,
 	$permission('products.edit'),
 ]);
-$router->get('/api/v1/products/{id}/stock', static fn (int $id): array => (new ProductApiController($authService, $productService))->stock($id), [
+$router->get('/api/v1/products/{id}/stock', static fn (int $id): array => (new ProductApiController($productService))->stock($id), [
 	$auth,
 	$permission('stock.view'),
 ]);

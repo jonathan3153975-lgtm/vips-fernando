@@ -142,9 +142,27 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 - [ ] `P2` Painel administrativo do SaaS (criar/empresa, suspender assinatura, limites) — `manual/19`.
 
 ### 2.4 Garantia estrutural de isolamento (prioridade máxima de segurança)
-- [ ] `P1` Introduzir uma camada base de repositório que **exija** `tenant_id` em toda consulta de negócio, tornando o vazamento de dados impossível por omissão.
-- [ ] `P1` Adicionar testes de integração que tentem, explicitamente, acessar registro de outro tenant em **todas** as rotas por id e esperar 404/403.
-- [ ] `P2` Migrar os repositories existentes para a nova camada.
+- [x] `P1` Introduzir uma camada base de repositório que **exija** `tenant_id` em toda consulta de negócio, tornando o vazamento de dados impossível por omissão.
+- [x] `P1` Adicionar testes de integração que tentem, explicitamente, acessar registro de outro tenant em **todas** as rotas por id e esperar 404/403.
+- [x] `P2` Migrar os repositories existentes para a nova camada.
+
+**Implementado:**
+- `BaseRepository` (acesso a `PDO`) e `TenantScopedRepository` (exige o marcador `:tenant_id` e injeta o tenant da sessão; lança `UnscopedQueryException` se faltar, e `MissingTenantException` se não houver tenant ativo). A validação roda **antes** de preparar a query, para não depender do banco estar acessível.
+- `TenantContext` resolve o tenant e o usuário a partir da sessão, de forma lazy (repositories são construídos antes do login).
+- `NotFoundException` substitui a comparação de string que decidia o `404` nos controllers.
+- Migrados: `UserRepository`, `ProductRepository`, `ImportRepository`, `AuditLogRepository`. `tenantId`/`userId` saíram das assinaturas de services e controllers.
+- Vazamentos latentes corrigidos: `UserRepository::findById()` e `permissionsForUser()` agora filtram por tenant; `expenseTotal()`, `itemTotals()` e `allocateExpenses()` passaram a filtrar por tenant e a validar a posse do registro (`findOrFail`).
+- Filas sem `tenant_id` própria (`product_prices`) são escopadas via subquery no pai (`products`), para funcionar em MySQL e SQLite.
+- **Exceções deliberadas e documentadas** (fora do escopo, pois ainda não existe tenant na sessão): `UserRepository::findByEmail()` (login é o único ponto em que o tenant é desconhecido) e `AuditLogRepository::createForTenant()`, usada só por `PasswordResetService`.
+- `AuthService::attempt()` passou a gravar a identidade na sessão **antes** de carregar as permissões (a leitura virou tenant-scoped), com rollback da sessão se a carga falhar.
+- `tests/Integration/CrossTenantTest.php`: 11 testes cobrindo as 6 rotas por id, listagem, `findById`/`permissionsForUser` entre tenants, e as duas guardas. Total da suíte: 27 testes / 117 asserções.
+- Validado também no MySQL real: isolamento entre tenants, `INSERT..SELECT` em `product_prices` e fluxo de login.
+
+**Limitações conhecidas:**
+- A guarda exige o marcador `:tenant_id`, mas é uma convenção de runtime: não prova que o predicado está semanticamente correto (ex.: `p.tenant_id` pode estar na tabela errada, via `JOIN`).
+- `pdo()` é `protected`, então uma classe pode contornar a guarda de propósito. Hoje nenhuma faz.
+- Tabelas sem `tenant_id` dependem do pai estar corretamente filtrado; não há verificação automática disso.
+- `products.category_id` / `brand_id` / `supplier_id` e `imports.responsible_user_id` aceitam hoje qualquer `id` existente, inclusive de outro tenant. Tratar na Etapa 2.1/2.2.
 
 **Critério de conclusão:** um usuário sem permissão recebe 403 consistente; um usuário do tenant A que tenta acessar registro do tenant B recebe 404 em qualquer endpoint por id; fluxo completo de recuperação de senha funciona ponta a ponta; configurações do tenant influenciam a exibição.
 

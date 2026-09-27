@@ -29,7 +29,7 @@ final class PasswordResetService
         $expiresAt = date('Y-m-d H:i:s', strtotime('+1 hour'));
         $this->passwordResets->create((int) $user['id'], $token, $expiresAt);
 
-        $this->auditLogs->create(
+        $this->auditLogs->createForTenant(
             (int) $user['tenant_id'],
             (int) $user['id'],
             'auth.password_reset_requested',

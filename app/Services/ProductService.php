@@ -16,12 +16,20 @@ final class ProductService
     ) {
     }
 
-    public function list(int $tenantId): array
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function list(): array
     {
-        return $this->products->allByTenant($tenantId);
+        return $this->products->all();
     }
 
-    public function create(int $tenantId, int $userId, array $data): array
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public function create(array $data): array
     {
         foreach (['sku', 'name'] as $field) {
             if (!isset($data[$field]) || trim((string) $data[$field]) === '') {
@@ -29,32 +37,30 @@ final class ProductService
             }
         }
 
-        $product = $this->products->create($tenantId, $data);
-        $this->auditLogs->create($tenantId, $userId, 'products.create', 'product', (int) $product['id']);
+        $product = $this->products->create($data);
+        $this->auditLogs->create('products.create', 'product', (int) $product['id']);
 
         return $product;
     }
 
-    public function update(int $tenantId, int $userId, int $productId, array $data): array
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public function update(int $productId, array $data): array
     {
-        if ($this->products->findForTenant($tenantId, $productId) === null) {
-            throw new RuntimeException('Produto nao encontrado.');
-        }
-
-        $product = $this->products->update($tenantId, $productId, $data);
-        $this->auditLogs->create($tenantId, $userId, 'products.update', 'product', $productId);
+        $product = $this->products->update($productId, $data);
+        $this->auditLogs->create('products.update', 'product', $productId);
 
         return $product;
     }
 
-    public function stock(int $tenantId, int $productId): array
+    /**
+     * @return array<string, mixed>
+     */
+    public function stock(int $productId): array
     {
-        $stock = $this->products->stockForTenant($tenantId, $productId);
-
-        if ($stock === null) {
-            throw new RuntimeException('Produto nao encontrado.');
-        }
-
-        return $stock;
+        return $this->products->stock($productId);
     }
 }

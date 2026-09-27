@@ -16,90 +16,104 @@ final class ImportService
     ) {
     }
 
-    public function list(int $tenantId): array
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function list(): array
     {
-        return $this->imports->allByTenant($tenantId);
+        return $this->imports->all();
     }
 
-    public function create(int $tenantId, int $userId, array $data): array
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public function create(array $data): array
     {
         $this->validateImport($data);
-        $import = $this->imports->create($tenantId, $data);
+        $import = $this->imports->create($data);
 
-        $this->auditLogs->create($tenantId, $userId, 'imports.create', 'import', (int) $import['id']);
-
-        return $import;
-    }
-
-    public function update(int $tenantId, int $userId, int $importId, array $data): array
-    {
-        if ($this->imports->findForTenant($tenantId, $importId) === null) {
-            throw new RuntimeException('Importacao nao encontrada.');
-        }
-
-        $import = $this->imports->update($tenantId, $importId, $data);
-        $this->auditLogs->create($tenantId, $userId, 'imports.update', 'import', $importId);
+        $this->auditLogs->create('imports.create', 'import', (int) $import['id']);
 
         return $import;
     }
 
-    public function addExpense(int $tenantId, int $userId, int $importId, array $data): array
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public function update(int $importId, array $data): array
     {
-        if ($this->imports->findForTenant($tenantId, $importId) === null) {
-            throw new RuntimeException('Importacao nao encontrada.');
-        }
+        $import = $this->imports->update($importId, $data);
+        $this->auditLogs->create('imports.update', 'import', $importId);
 
+        return $import;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public function addExpense(int $importId, array $data): array
+    {
         foreach (['category', 'description', 'currency', 'amount', 'exchange_rate', 'expense_date'] as $field) {
             if (!isset($data[$field]) || $data[$field] === '') {
                 throw new RuntimeException('Campo obrigatorio ausente: ' . $field);
             }
         }
 
-        $expense = $this->imports->addExpense($tenantId, $importId, $data);
-        $this->auditLogs->create($tenantId, $userId, 'imports.expense.create', 'import', $importId, ['expense_id' => $expense['id']]);
+        $expense = $this->imports->addExpense($importId, $data);
+        $this->auditLogs->create('imports.expense.create', 'import', $importId, ['expense_id' => $expense['id']]);
 
         return $expense;
     }
 
-    public function addItem(int $tenantId, int $userId, int $importId, array $data): array
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public function addItem(int $importId, array $data): array
     {
-        if ($this->imports->findForTenant($tenantId, $importId) === null) {
-            throw new RuntimeException('Importacao nao encontrada.');
-        }
-
         foreach (['product_name', 'quantity', 'unit_cost_foreign', 'exchange_rate'] as $field) {
             if (!isset($data[$field]) || $data[$field] === '') {
                 throw new RuntimeException('Campo obrigatorio ausente: ' . $field);
             }
         }
 
-        $item = $this->imports->addItem($tenantId, $importId, $data);
-        $this->auditLogs->create($tenantId, $userId, 'imports.item.create', 'import', $importId, ['item_id' => $item['id']]);
+        $item = $this->imports->addItem($importId, $data);
+        $this->auditLogs->create('imports.item.create', 'import', $importId, ['item_id' => $item['id']]);
 
         return $item;
     }
 
-    public function complete(int $tenantId, int $userId, int $importId): array
+    /**
+     * @return array<string, mixed>
+     */
+    public function complete(int $importId): array
     {
-        $import = $this->imports->findForTenant($tenantId, $importId);
-
-        if ($import === null) {
-            throw new RuntimeException('Importacao nao encontrada.');
-        }
-
         $expenseTotal = $this->imports->expenseTotal($importId);
         $itemTotals = $this->imports->itemTotals($importId);
-        $itemsCost = (float) $itemTotals['total_cost_local'];
-        $itemsQuantity = (float) $itemTotals['total_quantity'];
 
         $this->imports->allocateExpenses($importId, $expenseTotal);
-        $completed = $this->imports->complete($tenantId, $importId, $itemsCost + $expenseTotal, $expenseTotal, $itemsQuantity);
+        $completed = $this->imports->complete(
+            $importId,
+            $itemTotals['total_cost_local'] + $expenseTotal,
+            $expenseTotal,
+            $itemTotals['total_quantity'],
+        );
 
-        $this->auditLogs->create($tenantId, $userId, 'imports.complete', 'import', $importId);
+        $this->auditLogs->create('imports.complete', 'import', $importId);
 
         return $completed;
     }
 
+    /**
+     * @param array<string, mixed> $data
+     */
     private function validateImport(array $data): void
     {
         foreach (['name', 'country', 'start_date', 'currency', 'exchange_rate'] as $field) {

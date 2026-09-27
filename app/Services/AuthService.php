@@ -31,8 +31,6 @@ final class AuthService
 
         session_regenerate_id(true);
 
-        $permissions = $this->users->permissionsForUser((int) $user['id']);
-
         $this->session->put('auth', [
             'user_id' => (int) $user['id'],
             'tenant_id' => (int) $user['tenant_id'],
@@ -40,18 +38,24 @@ final class AuthService
             'email' => $user['email'],
             'role' => $user['role_name'],
             'tenant_name' => $user['tenant_name'],
-            'permissions' => $permissions,
+            'permissions' => [],
         ]);
 
+        try {
+            $permissions = $this->users->permissionsForUser((int) $user['id']);
+        } catch (\Throwable $exception) {
+            $this->session->forget('auth');
+            $this->session->invalidate();
+
+            throw $exception;
+        }
+
+        $auth = $this->session->get('auth');
+        $auth['permissions'] = $permissions;
+        $this->session->put('auth', $auth);
+
         $this->users->updateLastLogin((int) $user['id']);
-        $this->auditLogs->create(
-            (int) $user['tenant_id'],
-            (int) $user['id'],
-            'auth.login',
-            'user',
-            (int) $user['id'],
-            ['email' => $user['email']]
-        );
+        $this->auditLogs->create('auth.login', 'user', (int) $user['id'], ['email' => $user['email']]);
 
         return true;
     }
@@ -61,13 +65,7 @@ final class AuthService
         $user = $this->user();
 
         if ($user !== null) {
-            $this->auditLogs->create(
-                $user['tenant_id'],
-                $user['user_id'],
-                'auth.logout',
-                'user',
-                $user['user_id'],
-            );
+            $this->auditLogs->create('auth.logout', 'user', (int) $user['user_id']);
         }
 
         $this->session->forget('auth');
