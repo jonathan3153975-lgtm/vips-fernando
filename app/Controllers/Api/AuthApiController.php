@@ -8,6 +8,7 @@ use App\Core\Controller;
 use App\Core\Request;
 use App\Services\AuthService;
 use App\Services\PasswordResetService;
+use RuntimeException;
 
 final class AuthApiController extends Controller
 {
@@ -51,5 +52,23 @@ final class AuthApiController extends Controller
         $this->passwordReset->request($email);
 
         return $this->json(['message' => 'Solicitacao recebida.'], 202);
+    }
+
+    public function passwordResetConfirm(): array
+    {
+        $token = trim((string) Request::input('token', ''));
+        $password = (string) Request::input('password', '');
+
+        if ($token === '' || $password === '') {
+            return $this->json(['message' => 'Token e senha sao obrigatorios.'], 400);
+        }
+
+        try {
+            $this->passwordReset->confirm($token, $password);
+        } catch (RuntimeException $exception) {
+            return $this->json(['message' => $exception->getMessage()], 400);
+        }
+
+        return $this->json(['message' => 'Senha redefinida com sucesso.']);
     }
 }

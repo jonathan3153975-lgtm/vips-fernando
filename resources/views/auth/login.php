@@ -78,6 +78,13 @@
             background: #fef3f2;
             color: var(--danger);
         }
+        .notice {
+            margin-bottom: 16px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: #e9f6ef;
+            color: #1b7f4b;
+        }
         .meta {
             margin-top: 18px;
             color: var(--muted);
@@ -105,6 +112,10 @@
                 <div class="error"><?= htmlspecialchars((string) $error, ENT_QUOTES, 'UTF-8') ?></div>
             <?php endif; ?>
 
+            <?php if ($notice ?? null): ?>
+                <div class="notice"><?= htmlspecialchars((string) $notice, ENT_QUOTES, 'UTF-8') ?></div>
+            <?php endif; ?>
+
             <form method="post" action="/login">
                 <?= $csrfField ?>
 
@@ -121,6 +132,7 @@
                 <button type="submit">Acessar</button>
             </form>
 
+            <p class="meta"><a href="/esqueci-senha">Esqueci minha senha</a></p>
             <p class="meta">Seed padrao de desenvolvimento cria um usuario administrador quando o banco estiver configurado.</p>
         </section>
     </main>

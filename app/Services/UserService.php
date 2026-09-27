@@ -7,12 +7,11 @@ namespace App\Services;
 use App\Repositories\AuditLogRepository;
 use App\Repositories\RoleRepository;
 use App\Repositories\UserRepository;
+use App\Support\PasswordPolicy;
 use RuntimeException;
 
 final class UserService
 {
-    private const MIN_PASSWORD_LENGTH = 8;
-
     public function __construct(
         private readonly UserRepository $users,
         private readonly RoleRepository $roles,
@@ -55,7 +54,7 @@ final class UserService
             throw new RuntimeException('E-mail invalido.');
         }
 
-        $this->assertPasswordAcceptable($password);
+        PasswordPolicy::assertAcceptable($password);
         $this->assertEmailAvailable($email);
         $this->assertRoleBelongsToTenant($this->requiredInt($data, 'role_id'));
 
@@ -126,7 +125,7 @@ final class UserService
     public function changePassword(int $userId, string $password): array
     {
         $this->users->findOrFail($userId);
-        $this->assertPasswordAcceptable($password);
+        PasswordPolicy::assertAcceptable($password);
 
         $this->users->updatePassword($userId, password_hash($password, PASSWORD_DEFAULT));
         $this->auditLogs->create('users.password_change', 'user', $userId);
@@ -198,15 +197,6 @@ final class UserService
 
         if ($role === null) {
             throw new RuntimeException('Perfil invalido.');
-        }
-    }
-
-    private function assertPasswordAcceptable(string $password): void
-    {
-        if (strlen($password) < self::MIN_PASSWORD_LENGTH) {
-            throw new RuntimeException(
-                'A senha deve ter ao menos ' . self::MIN_PASSWORD_LENGTH . ' caracteres.'
-            );
         }
     }
 

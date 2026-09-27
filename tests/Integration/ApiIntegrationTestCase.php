@@ -72,6 +72,7 @@ abstract class ApiIntegrationTestCase extends TestCase
     protected function dispatchJson(string $method, string $uri, array $payload = []): array
     {
         $_POST = [];
+        $_GET = [];
         $_SERVER['REQUEST_METHOD'] = strtoupper($method);
         $_SERVER['REQUEST_URI'] = $uri;
         $_SERVER['CONTENT_TYPE'] = 'application/json';
@@ -83,6 +84,7 @@ abstract class ApiIntegrationTestCase extends TestCase
     protected function dispatchForm(string $method, string $uri, array $form = []): array
     {
         $_POST = $form;
+        $_GET = [];
         $_SERVER['REQUEST_METHOD'] = strtoupper($method);
         $_SERVER['REQUEST_URI'] = $uri;
         $_SERVER['CONTENT_TYPE'] = 'application/x-www-form-urlencoded';
@@ -93,11 +95,14 @@ abstract class ApiIntegrationTestCase extends TestCase
 
     /**
      * Requisicao de pagina (sem payload), usada para conferir as telas
-     * server-rendered.
+     * server-rendered. A query string da URI vira $_GET, para o controller ler
+     * parametros como o token de redefinicao.
      */
     protected function dispatchPage(string $method, string $uri): array
     {
         $_POST = [];
+        $_GET = [];
+        parse_str((string) (parse_url($uri, PHP_URL_QUERY) ?? ''), $_GET);
         $_SERVER['REQUEST_METHOD'] = strtoupper($method);
         $_SERVER['REQUEST_URI'] = $uri;
         unset($_SERVER['CONTENT_TYPE'], $_SERVER['__BODY__'], $_SERVER['HTTP_REFERER'], $_SERVER['HTTP_X_CSRF_TOKEN']);
@@ -125,6 +130,7 @@ abstract class ApiIntegrationTestCase extends TestCase
         $form = [Csrf::FIELD_NAME => $this->csrfToken()] + $form;
 
         $_POST = $form;
+        $_GET = [];
         $_SERVER['REQUEST_METHOD'] = strtoupper($method);
         $_SERVER['REQUEST_URI'] = $uri;
         $_SERVER['CONTENT_TYPE'] = 'application/x-www-form-urlencoded';
@@ -161,7 +167,13 @@ abstract class ApiIntegrationTestCase extends TestCase
         $router = new Router();
         require dirname(__DIR__, 2) . '/routes/web.php';
 
-        return $router->dispatch(strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')), (string) ($_SERVER['REQUEST_URI'] ?? '/'));
+        // Em producao o Application::resolvePath() remove a query string; aqui
+        // fazemos o mesmo para o roteamento bater com o servidor real.
+        $uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+        $path = parse_url($uri, PHP_URL_PATH);
+        $path = is_string($path) && $path !== '' ? $path : '/';
+
+        return $router->dispatch(strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')), $path);
     }
 
     /**
@@ -217,7 +229,7 @@ abstract class ApiIntegrationTestCase extends TestCase
             'CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER, name TEXT NOT NULL, description TEXT, is_system INTEGER NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT)',
-            'CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, role_id INTEGER NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT, password TEXT NOT NULL, avatar TEXT, status TEXT NOT NULL, last_login TEXT, created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, role_id INTEGER NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, phone TEXT, password TEXT NOT NULL, auth_version INTEGER NOT NULL DEFAULT 0, avatar TEXT, status TEXT NOT NULL, last_login TEXT, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE password_resets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, used_at TEXT, created_at TEXT)',
             'CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER, user_id INTEGER, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id INTEGER, metadata TEXT, created_at TEXT)',
             'CREATE TABLE suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, name TEXT NOT NULL, country TEXT, city TEXT, contact_name TEXT, email TEXT, phone TEXT, notes TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',

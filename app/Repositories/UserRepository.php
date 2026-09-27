@@ -37,12 +37,30 @@ final class UserRepository extends TenantScopedRepository
     }
 
     /**
+     * Leitura sem escopo de tenant, usada apenas pelo fluxo de redefinicao de
+     * senha, que roda antes da sessao existir. O user_id ja foi resolvido por um
+     * token validado; este metodo so completa os dados para a auditoria.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findByIdWithoutTenant(int $userId): ?array
+    {
+        $statement = $this->pdo()->prepare(
+            'SELECT id, tenant_id, name, email, status FROM users WHERE id = :id LIMIT 1'
+        );
+        $statement->execute(['id' => $userId]);
+
+        $user = $statement->fetch();
+
+        return $user === false ? null : $user;
+    }
+
+    /**
      * Consulta global deliberada: `uq_users_email` e unico por email, nao por
      * (tenant, email). O login depende dessa unicidade para desambiguar o
      * tenant, entao a verificacao precisa ter o mesmo escopo do indice.
      */
-    public function emailExistsInAnyTenant(string $email, ?int $ignoreUserId = null): bool
-    {
+    public function emailExistsInAnyTenant(string $email, ?int $ignoreUserId = null): bool    {
         $sql = 'SELECT id FROM users WHERE email = :email';
         $params = ['email' => mb_strtolower(trim($email))];
 
@@ -171,7 +189,7 @@ final class UserRepository extends TenantScopedRepository
     public function updatePassword(int $userId, string $passwordHash): void
     {
         $this->run(
-            'UPDATE users SET password = :password, updated_at = :updated_at
+            'UPDATE users SET password = :password, auth_version = auth_version + 1, updated_at = :updated_at
              WHERE tenant_id = :tenant_id AND id = :id',
             [
                 'password' => $passwordHash,
@@ -179,6 +197,40 @@ final class UserRepository extends TenantScopedRepository
                 'id' => $userId,
             ],
         );
+    }
+
+    /**
+     * Usada pelo fluxo de redefinicao, que roda sem sessao (o usuario esta
+     * justamente bloqueado fora). O vinculo e o user_id ja resolvido pelo token
+     * — a autorizacao e o proprio token, consumido pelo PasswordResetService.
+     * Incrementa auth_version para derrubar sessoes abertas com a senha antiga.
+     */
+    public function updatePasswordWithoutTenant(int $userId, string $passwordHash): void
+    {
+        $statement = $this->pdo()->prepare(
+            'UPDATE users SET password = :password, auth_version = auth_version + 1, updated_at = :updated_at
+             WHERE id = :id'
+        );
+
+        $statement->execute([
+            'password' => $passwordHash,
+            'updated_at' => date('Y-m-d H:i:s'),
+            'id' => $userId,
+        ]);
+    }
+
+    /**
+     * Versao de autenticacao atual, para o AuthService comparar com a guardada
+     * na sessao. Requer sessao valida, entao passa pela camada com escopo.
+     */
+    public function authVersion(int $userId): ?int
+    {
+        $value = $this->selectValue(
+            'SELECT auth_version FROM users WHERE tenant_id = :tenant_id AND id = :id',
+            ['id' => $userId],
+        );
+
+        return $value === null ? null : (int) $value;
     }
 
     /**

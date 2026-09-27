@@ -55,15 +55,26 @@ $tenantService = new TenantService(
     (string) Application::getInstance()->config('app.timezone', 'America/Sao_Paulo'),
 );
 
+$newAuthController = static fn (): AuthController => new AuthController(
+    $authService,
+    $passwordResetService,
+    $session,
+    (bool) Application::getInstance()->config('app.debug', false),
+);
+
 $router->use(static fn (callable $next): array => (new CsrfMiddleware($session))->handle($next));
 
 $guest = static fn (callable $next): array => (new GuestMiddleware($authService))->handle($next);
 $auth = static fn (callable $next): array => (new AuthMiddleware($authService))->handle($next);
 $permission = static fn (string $name): callable => static fn (callable $next): array => (new PermissionMiddleware($authService, $name))->handle($next);
 
-$router->get('/login', static fn (): array => (new AuthController($authService, $session))->create(), [$guest]);
-$router->post('/login', static fn (): array => (new AuthController($authService, $session))->store(), [$guest]);
-$router->post('/logout', static fn (): array => (new AuthController($authService, $session))->destroy(), [$auth]);
+$router->get('/login', static fn (): array => $newAuthController()->create(), [$guest]);
+$router->post('/login', static fn (): array => $newAuthController()->store(), [$guest]);
+$router->post('/logout', static fn (): array => $newAuthController()->destroy(), [$auth]);
+$router->get('/esqueci-senha', static fn (): array => $newAuthController()->forgotPasswordForm(), [$guest]);
+$router->post('/esqueci-senha', static fn (): array => $newAuthController()->forgotPassword(), [$guest]);
+$router->get('/redefinir-senha', static fn (): array => $newAuthController()->resetPasswordForm(), [$guest]);
+$router->post('/redefinir-senha', static fn (): array => $newAuthController()->resetPassword(), [$guest]);
 
 $router->get('/dashboard', static fn (): array => (new DashboardController($authService, $session))->index(), [
 	$auth,
@@ -73,6 +84,7 @@ $router->get('/dashboard', static fn (): array => (new DashboardController($auth
 $router->post('/api/v1/auth/login', static fn (): array => (new AuthApiController($authService, $passwordResetService))->login(), [$guest]);
 $router->post('/api/v1/auth/logout', static fn (): array => (new AuthApiController($authService, $passwordResetService))->logout(), [$auth]);
 $router->post('/api/v1/auth/password-reset', static fn (): array => (new AuthApiController($authService, $passwordResetService))->passwordReset(), [$guest]);
+$router->post('/api/v1/auth/password-reset/confirm', static fn (): array => (new AuthApiController($authService, $passwordResetService))->passwordResetConfirm(), [$guest]);
 
 $router->get('/api/v1/imports', static fn (): array => (new ImportApiController($importService))->index(), [
 	$auth,

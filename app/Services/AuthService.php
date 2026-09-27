@@ -40,6 +40,7 @@ final class AuthService
             'email' => $user['email'],
             'role' => $user['role_name'],
             'tenant_name' => $user['tenant_name'],
+            'auth_version' => (int) ($user['auth_version'] ?? 0),
             'permissions' => [],
         ]);
 
@@ -83,7 +84,41 @@ final class AuthService
 
     public function check(): bool
     {
-        return $this->session->get('auth') !== null;
+        $auth = $this->user();
+
+        if ($auth === null) {
+            return false;
+        }
+
+        if (!$this->sessionIsCurrent($auth)) {
+            $this->session->forget('auth');
+            $this->session->invalidate();
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * A sessao guarda a auth_version vigente no login. Trocar a senha incrementa
+     * a versao no banco (inclusive a redefinicao), entao uma sessao antiga deixa
+     * de bater aqui e cai na proxima requisicao — e como "invalidar todas as
+     * sessoes" funciona com sessao em arquivo, sem indice por usuario.
+     *
+     * @param array<string, mixed> $auth
+     */
+    private function sessionIsCurrent(array $auth): bool
+    {
+        $userId = (int) ($auth['user_id'] ?? 0);
+
+        if ($userId <= 0) {
+            return false;
+        }
+
+        $current = $this->users->authVersion($userId);
+
+        return $current !== null && $current === (int) ($auth['auth_version'] ?? 0);
     }
 
     public function user(): ?array

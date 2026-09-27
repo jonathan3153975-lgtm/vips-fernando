@@ -154,12 +154,33 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 
 
 ### 2.2 Recuperação de senha (EPIC 02 — fluxo hoje incompleto)
-> Hoje `PasswordResetService::request()` gera o token, mas **nada é enviado e não existe rota de redefinição**. O fluxo morre no passo 1.
+> Antes: `PasswordResetService::request()` gerava o token, mas **nada era enviado e não existia rota de redefinição**. O fluxo morria no passo 1.
 
-- [ ] `P0` Criar `POST /api/v1/auth/password-reset/confirm` com `token` + `password`, validando expiração (1 h) e `used_at`.
-- [ ] `P1` Invalidar todas as sessões do usuário após a redefinição.
-- [ ] `P1` Telas: "esqueci minha senha" e "definir nova senha".
+- [x] `P0` Criar `POST /api/v1/auth/password-reset/confirm` com `token` + `password`, validando expiração (1 h) e `used_at`.
+- [x] `P1` Invalidar todas as sessões do usuário após a redefinição.
+- [x] `P1` Telas: "esqueci minha senha" e "definir nova senha".
 - [ ] `P2` Envio de e-mail (ver `manual/20 — Integrações Externas`) com template e link assinada.
+
+**Implementado:**
+- `POST /api/v1/auth/password-reset/confirm` (e `request`, já existente) e o fluxo web completo: `GET/POST /esqueci-senha` e `GET/POST /redefinir-senha`, com PRG e flash. Formulários nativos postam em rota web pelo mesmo motivo da 2.1 (rota `/api/` rejeita `x-www-form-urlencoded` com 415).
+- **Token nunca é gravado em claro.** `request()` gera 32 bytes aleatórios, devolve o token ao chamador e guarda apenas `hash('sha256', $token)`. Um vazamento da tabela `password_resets` não permite redefinir senha. Pedir um novo link apaga os tokens anteriores do usuário, então só o último funciona.
+- `confirm()` valida: token existe, `used_at IS NULL`, `expires_at` no futuro e usuário `ACTIVE`; aplica `PasswordPolicy` (mínimo 8) e marca `used_at`. Regra de senha extraída para `App\Support\PasswordPolicy`, agora compartilhada com `UserService` (antes era duplicada).
+- **Invalidação de sessões via `auth_version`.** Migration `2026_08_01_000014` adiciona `users.auth_version`. O login grava o valor na sessão; `AuthService::check()` compara com o banco a cada requisição e derruba a sessão se divergir. `updatePassword` (troca pelo admin) e `updatePasswordWithoutTenant` (reset) incrementam o contador. Sem isso, "invalidar todas as sessões" seria impossível: a sessão é arquivo no servidor e não há índice por usuário.
+- Repositórios pré-auth documentados: `UserRepository::findByIdWithoutTenant()` e `updatePasswordWithoutTenant()`, no mesmo padrão de `findByEmail()`/`createForTenant()`. O `user_id` só é alcançado após um token válido.
+
+**Desvio do roteiro, com motivo:**
+- **Não há envio de e-mail (P2).** Para não travar o teste manual, quando `APP_DEBUG=true` a tela `/esqueci-senha` exibe o link gerado. Em produção nada é exibido e a resposta continua genérica ("Se o email estiver cadastrado..."), evitando enumeração de contas. O fluxo só é útil em produção depois do P2 (`manual/20`).
+
+**Validação:**
+- `tests/Integration/PasswordResetTest.php` (19 testes): resposta genérica a e-mail existente e inexistente, token hasheado, rejeição de token expirado/usado/desconhecido/senha fraca/usuário inativo, invalidação de token anterior, queda da sessão após reset, bump de `auth_version` na troca pela administração, fluxo web completo e confirmação divergente. Suíte completa: **121 testes / 458 asserções**, verde.
+- `composer lint` verde em 90 arquivos.
+- Probe no MySQL real: 20/20 verificações, incluindo queda da sessão via `AuthService::check()` e repetição com `PDO::ATTR_EMULATE_PREPARES = false`. Senha, `auth_version` e tokens restaurados ao final.
+- Smoke HTTP com `php -S`: 14/14 no fluxo real navegador (login → esqueci → link → redefinir → login com nova senha → reuso rejeitado → restauração). Senha original restaurada.
+
+**Limitações conhecidas:**
+- O link de redefinição não é assinado separadamente; a autorização é o token aleatório de 256 bits, de uso único e validade de 1 hora. Quando o envio de e-mail entrar (P2), vale assinar o link com validade própria.
+- Não há rate limit na solicitação de reset (parte do P2 de rate limit da 2.1).
+- A queda de sessão depende de `AuthService::check()` rodar; rotas que não passam pelo `AuthMiddleware` (nenhuma hoje) não seriam afetadas.
 
 ### 2.3 Tenant e configurações (EPIC 03)
 > Antes: `tenant_settings` era criada e populada pelo seed, mas **nunca lida pelo código**, e `tenants` não tinha índice único. Ambos resolvidos abaixo.
