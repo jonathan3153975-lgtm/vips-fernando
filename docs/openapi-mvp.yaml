@@ -1,0 +1,871 @@
+openapi: 3.1.0
+info:
+  title: ImportControl MVP API
+  version: 1.0.0
+  description: Contratos HTTP do MVP para autenticacao, importacoes, produtos, vendas e financeiro.
+  license:
+    name: Proprietary
+servers:
+  - url: https://api.importcontrol.local
+security:
+  - sessionAuth: []
+tags:
+  - name: Auth
+    description: Endpoints de autenticacao, sessao e recuperacao de senha.
+  - name: Imports
+    description: Endpoints de importacoes, despesas, itens comprados e fechamento.
+  - name: Products
+    description: Endpoints de produtos, precificacao e consulta de estoque.
+  - name: Sales
+    description: Endpoints de vendas, checkout, cancelamento e devolucao.
+  - name: Financial
+    description: Endpoints de transacoes, contas e fluxo de caixa.
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Autentica usuario do MVP
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login concluido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSessionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Encerra sessao autenticada
+      operationId: authLogout
+      security:
+        - sessionAuth: []
+      responses:
+        '204':
+          description: Sessao encerrada
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/auth/password-reset:
+    post:
+      tags: [Auth]
+      summary: Solicita recuperacao de senha
+      operationId: authPasswordReset
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '202':
+          description: Solicitacao recebida
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/imports:
+    get:
+      tags: [Imports]
+      summary: Lista importacoes do tenant
+      operationId: listImports
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PLANNED, IN_PROGRESS, COMPLETED, CANCELLED]
+      responses:
+        '200':
+          description: Lista paginada de importacoes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Imports]
+      summary: Cria importacao
+      operationId: createImport
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportCreateRequest'
+      responses:
+        '201':
+          description: Importacao criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/imports/{id}:
+    put:
+      tags: [Imports]
+      summary: Atualiza importacao
+      operationId: updateImport
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportUpdateRequest'
+      responses:
+        '200':
+          description: Importacao atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/imports/{id}/expenses:
+    post:
+      tags: [Imports]
+      summary: Adiciona despesa na importacao
+      operationId: createImportExpense
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportExpenseCreateRequest'
+      responses:
+        '201':
+          description: Despesa criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportExpenseResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/imports/{id}/items:
+    post:
+      tags: [Imports]
+      summary: Adiciona item comprado na importacao
+      operationId: createImportItem
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportItemCreateRequest'
+      responses:
+        '201':
+          description: Item criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportItemResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/imports/{id}/complete:
+    post:
+      tags: [Imports]
+      summary: Fecha importacao e congela custos
+      operationId: completeImport
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Importacao concluida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/products:
+    get:
+      tags: [Products]
+      summary: Lista produtos
+      operationId: listProducts
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista paginada de produtos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Products]
+      summary: Cria produto
+      operationId: createProduct
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductCreateRequest'
+      responses:
+        '201':
+          description: Produto criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/products/{id}:
+    put:
+      tags: [Products]
+      summary: Atualiza produto
+      operationId: updateProduct
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpdateRequest'
+      responses:
+        '200':
+          description: Produto atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/products/{id}/stock:
+    get:
+      tags: [Products]
+      summary: Consulta saldo de estoque do produto
+      operationId: getProductStock
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Saldo atual do produto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductStockResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/sales:
+    get:
+      tags: [Sales]
+      summary: Lista vendas
+      operationId: listSales
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Lista paginada de vendas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaleCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Sales]
+      summary: Cria venda em aberto
+      operationId: createSale
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaleCreateRequest'
+      responses:
+        '201':
+          description: Venda criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaleResourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/sales/{id}:
+    get:
+      tags: [Sales]
+      summary: Consulta venda por id
+      operationId: getSale
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Venda encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaleResourceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/sales/{id}/complete:
+    post:
+      tags: [Sales]
+      summary: Finaliza venda
+      operationId: completeSale
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Venda finalizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaleResourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/sales/{id}/cancel:
+    post:
+      tags: [Sales]
+      summary: Cancela venda e reverte efeitos permitidos
+      operationId: cancelSale
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Venda cancelada
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/sales/{id}/return:
+    post:
+      tags: [Sales]
+      summary: Registra devolucao total ou parcial
+      operationId: returnSale
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, amount]
+              properties:
+                reason:
+                  type: string
+                amount:
+                  type: number
+                  format: float
+      responses:
+        '201':
+          description: Devolucao registrada
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/financial:
+    get:
+      tags: [Financial]
+      summary: Lista transacoes financeiras
+      operationId: listFinancialTransactions
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [INCOME, EXPENSE]
+      responses:
+        '200':
+          description: Lista paginada de transacoes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinancialCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Financial]
+      summary: Cria transacao financeira manual
+      operationId: createFinancialTransaction
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinancialTransactionCreateRequest'
+      responses:
+        '201':
+          description: Transacao criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinancialResourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/cash-flow:
+    get:
+      tags: [Financial]
+      summary: Consulta fluxo de caixa por periodo
+      operationId: listCashFlow
+      security:
+        - sessionAuth: []
+      parameters:
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Resumo do fluxo de caixa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CashFlowCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/accounts-receivable:
+    get:
+      tags: [Financial]
+      summary: Lista contas a receber
+      operationId: listAccountsReceivable
+      security:
+        - sessionAuth: []
+      responses:
+        '200':
+          description: Lista contas a receber
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountsReceivableCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/accounts-payable:
+    get:
+      tags: [Financial]
+      summary: Lista contas a pagar
+      operationId: listAccountsPayable
+      security:
+        - sessionAuth: []
+      responses:
+        '200':
+          description: Lista contas a pagar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountsPayableCollectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: importcontrol_session
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PerPage:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 15
+  responses:
+    BadRequest:
+      description: Dados invalidos para a operacao solicitada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Nao autenticado ou credenciais invalidas
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    AuthSessionResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            user_id:
+              type: integer
+            tenant_id:
+              type: integer
+            name:
+              type: string
+            email:
+              type: string
+            role:
+              type: string
+            permissions:
+              type: array
+              items:
+                type: string
+    ImportCreateRequest:
+      type: object
+      required: [name, country, start_date, currency, exchange_rate]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        country: { type: string }
+        city: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        currency: { type: string }
+        exchange_rate: { type: number, format: float }
+        responsible_user_id: { type: integer }
+    ImportUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ImportCreateRequest'
+    ImportExpenseCreateRequest:
+      type: object
+      required: [category, description, currency, amount, exchange_rate, expense_date]
+      properties:
+        supplier_id: { type: integer }
+        category: { type: string }
+        description: { type: string }
+        currency: { type: string }
+        amount: { type: number, format: float }
+        exchange_rate: { type: number, format: float }
+        converted_amount: { type: number, format: float }
+        expense_date: { type: string, format: date }
+    ImportItemCreateRequest:
+      type: object
+      required: [product_name, quantity, unit_cost_foreign, exchange_rate]
+      properties:
+        supplier_id: { type: integer }
+        product_name: { type: string }
+        sku: { type: string }
+        quantity: { type: number, format: float }
+        unit_cost_foreign: { type: number, format: float }
+        exchange_rate: { type: number, format: float }
+    ImportResource:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        status: { type: string }
+        country: { type: string }
+        city: { type: string }
+        currency: { type: string }
+        exchange_rate: { type: number, format: float }
+    ImportResourceResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ImportResource'
+    ImportCollectionResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportResource'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    ImportExpenseResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            id: { type: integer }
+            category: { type: string }
+            converted_amount: { type: number, format: float }
+    ImportItemResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            id: { type: integer }
+            product_name: { type: string }
+            quantity: { type: number, format: float }
+            real_unit_cost: { type: number, format: float }
+    ProductCreateRequest:
+      type: object
+      required: [sku, name]
+      properties:
+        category_id: { type: integer }
+        brand_id: { type: integer }
+        supplier_id: { type: integer }
+        sku: { type: string }
+        barcode: { type: string }
+        name: { type: string }
+        description: { type: string }
+        unit: { type: string }
+        status: { type: string }
+        price:
+          type: object
+          properties:
+            cost_price: { type: number, format: float }
+            sale_price: { type: number, format: float }
+            minimum_price: { type: number, format: float }
+            margin: { type: number, format: float }
+    ProductUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ProductCreateRequest'
+    ProductResource:
+      type: object
+      properties:
+        id: { type: integer }
+        sku: { type: string }
+        barcode: { type: string }
+        name: { type: string }
+        status: { type: string }
+    ProductResourceResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ProductResource'
+    ProductCollectionResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductResource'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    ProductStockResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            product_id: { type: integer }
+            quantity: { type: number, format: float }
+            reserved_quantity: { type: number, format: float }
+            minimum_quantity: { type: number, format: float }
+    SaleCreateRequest:
+      type: object
+      required: [items]
+      properties:
+        customer_id: { type: integer }
+        sale_date: { type: string, format: date-time }
+        items:
+          type: array
+          items:
+            type: object
+            required: [product_id, quantity, sale_price]
+            properties:
+              product_id: { type: integer }
+              quantity: { type: number, format: float }
+              sale_price: { type: number, format: float }
+              discount: { type: number, format: float }
+        payments:
+          type: array
+          items:
+            type: object
+            properties:
+              method: { type: string }
+              amount: { type: number, format: float }
+              installments: { type: integer }
+    SaleResource:
+      type: object
+      properties:
+        id: { type: integer }
+        sale_number: { type: string }
+        status: { type: string }
+        total: { type: number, format: float }
+        profit: { type: number, format: float }
+    SaleResourceResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/SaleResource'
+    SaleCollectionResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SaleResource'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    FinancialTransactionCreateRequest:
+      type: object
+      required: [category_id, type, description, amount, transaction_date, reference_type]
+      properties:
+        category_id: { type: integer }
+        type: { type: string, enum: [INCOME, EXPENSE] }
+        description: { type: string }
+        amount: { type: number, format: float }
+        transaction_date: { type: string, format: date }
+        payment_date: { type: string, format: date }
+        reference_type: { type: string }
+        reference_id: { type: integer }
+    FinancialResource:
+      type: object
+      properties:
+        id: { type: integer }
+        type: { type: string }
+        description: { type: string }
+        amount: { type: number, format: float }
+        status: { type: string }
+    FinancialResourceResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/FinancialResource'
+    FinancialCollectionResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/FinancialResource'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    CashFlowCollectionResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              reference_date: { type: string, format: date }
+              initial_balance: { type: number, format: float }
+              income_total: { type: number, format: float }
+              expense_total: { type: number, format: float }
+              final_balance: { type: number, format: float }
+    AccountsReceivableCollectionResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              amount: { type: number, format: float }
+              due_date: { type: string, format: date }
+              status: { type: string }
+    AccountsPayableCollectionResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              amount: { type: number, format: float }
+              due_date: { type: string, format: date }
+              status: { type: string }

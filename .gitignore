@@ -1,0 +1,9 @@
+/vendor/
+/.env
+/.phpunit.result.cache
+/storage/logs/*.log
+/storage/cache/*
+/public/uploads/*
+!/public/uploads/.gitignore
+!/storage/cache/.gitignore
+!/storage/logs/.gitignore
