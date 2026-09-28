@@ -5,9 +5,11 @@ declare(strict_types=1);
 use App\Core\Application;
 use App\Core\Session;
 use App\Controllers\Api\AuthApiController;
+use App\Controllers\Api\ExchangeRateApiController;
 use App\Controllers\Api\ImportApiController;
 use App\Controllers\Api\ProductApiController;
 use App\Controllers\Api\RoleApiController;
+use App\Controllers\Api\SupplierApiController;
 use App\Controllers\Api\UserApiController;
 use App\Controllers\AuthController;
 use App\Controllers\DashboardController;
@@ -21,19 +23,23 @@ use App\Middlewares\CsrfMiddleware;
 use App\Middlewares\GuestMiddleware;
 use App\Middlewares\PermissionMiddleware;
 use App\Repositories\AuditLogRepository;
+use App\Repositories\ExchangeRateRepository;
 use App\Repositories\ImportRepository;
 use App\Repositories\PasswordResetRepository;
 use App\Repositories\PermissionRepository;
 use App\Repositories\ProductRepository;
 use App\Repositories\RoleRepository;
+use App\Repositories\SupplierRepository;
 use App\Repositories\TenantRepository;
 use App\Repositories\UserRepository;
 use App\Services\AuthService;
+use App\Services\ExchangeRateService;
 use App\Services\HealthService;
 use App\Services\ImportService;
 use App\Services\PasswordResetService;
 use App\Services\ProductService;
 use App\Services\RoleService;
+use App\Services\SupplierService;
 use App\Services\TenantService;
 use App\Services\UserService;
 
@@ -46,7 +52,11 @@ $userRepository = new UserRepository();
 $tenantRepository = new TenantRepository();
 $authService = new AuthService($userRepository, $auditLogRepository, $tenantRepository, $session);
 $passwordResetService = new PasswordResetService($userRepository, new PasswordResetRepository(), $auditLogRepository);
-$importService = new ImportService(new ImportRepository(), $auditLogRepository);
+$exchangeRateRepository = new ExchangeRateRepository();
+$exchangeRateService = new ExchangeRateService($exchangeRateRepository, $auditLogRepository);
+$supplierRepository = new SupplierRepository();
+$supplierService = new SupplierService($supplierRepository, $auditLogRepository);
+$importService = new ImportService(new ImportRepository(), $auditLogRepository, $exchangeRateService, $supplierRepository);
 $productService = new ProductService(new ProductRepository(), $auditLogRepository);
 $roleRepository = new RoleRepository();
 $tenantService = new TenantService(
@@ -109,6 +119,44 @@ $router->post('/api/v1/imports/{id}/items', static fn (int $id): array => (new I
 $router->post('/api/v1/imports/{id}/complete', static fn (int $id): array => (new ImportApiController($importService))->complete($id), [
 	$auth,
 	$permission('imports.complete'),
+]);
+$router->post('/api/v1/imports/{id}/reopen', static fn (int $id): array => (new ImportApiController($importService))->reopen($id), [
+	$auth,
+	$permission('imports.complete'),
+]);
+$router->get('/api/v1/imports/{id}/expenses', static fn (int $id): array => (new ImportApiController($importService))->expenses($id), [
+	$auth,
+	$permission('imports.view'),
+]);
+$router->get('/api/v1/imports/{id}/items', static fn (int $id): array => (new ImportApiController($importService))->items($id), [
+	$auth,
+	$permission('imports.view'),
+]);
+
+$router->get('/api/v1/exchange-rates', static fn (): array => (new ExchangeRateApiController($exchangeRateService))->index(), [
+	$auth,
+	$permission('imports.view'),
+]);
+$router->post('/api/v1/exchange-rates', static fn (): array => (new ExchangeRateApiController($exchangeRateService))->store(), [
+	$auth,
+	$permission('imports.create'),
+]);
+
+$router->get('/api/v1/suppliers', static fn (): array => (new SupplierApiController($supplierService))->index(), [
+	$auth,
+	$permission('imports.view'),
+]);
+$router->post('/api/v1/suppliers', static fn (): array => (new SupplierApiController($supplierService))->store(), [
+	$auth,
+	$permission('imports.create'),
+]);
+$router->get('/api/v1/suppliers/{id}', static fn (int $id): array => (new SupplierApiController($supplierService))->show($id), [
+	$auth,
+	$permission('imports.view'),
+]);
+$router->put('/api/v1/suppliers/{id}', static fn (int $id): array => (new SupplierApiController($supplierService))->update($id), [
+	$auth,
+	$permission('imports.create'),
 ]);
 
 $router->get('/api/v1/products', static fn (): array => (new ProductApiController($productService))->index(), [

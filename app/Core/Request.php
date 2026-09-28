@@ -37,6 +37,15 @@ final class Request
         return $data[$key] ?? $default;
     }
 
+    /**
+     * Parametro de query string (GET). Separado de input() porque o corpo e a
+     * query sao fontes diferentes: filtrar uma listagem nao deve ler o payload.
+     */
+    public static function query(string $key, mixed $default = null): mixed
+    {
+        return $_GET[$key] ?? $default;
+    }
+
     public static function isApi(): bool
     {
         $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);

@@ -5,9 +5,26 @@ declare(strict_types=1);
 namespace App\Repositories;
 
 use App\Core\NotFoundException;
+use RuntimeException;
+use Throwable;
 
 final class ImportRepository extends TenantScopedRepository
 {
+    public const STATUS_PLANNED = 'PLANNED';
+
+    public const STATUS_IN_PROGRESS = 'IN_PROGRESS';
+
+    public const STATUS_COMPLETED = 'COMPLETED';
+
+    public const STATUS_CANCELLED = 'CANCELLED';
+
+    public const ALLOCATION_VALUE = 'VALUE';
+
+    public const ALLOCATION_QUANTITY = 'QUANTITY';
+
+    /** @var list<string> */
+    public const ALLOCATION_METHODS = [self::ALLOCATION_VALUE, self::ALLOCATION_QUANTITY];
+
     /**
      * @return list<array<string, mixed>>
      */
@@ -49,15 +66,16 @@ final class ImportRepository extends TenantScopedRepository
     public function create(array $data): array
     {
         $timestamp = date('Y-m-d H:i:s');
+        $allocationMethod = (string) ($data['allocation_method'] ?? self::ALLOCATION_VALUE);
 
         $importId = $this->insert(
             'INSERT INTO imports (
                 tenant_id, responsible_user_id, name, description, country, city,
-                start_date, end_date, currency, exchange_rate, status,
+                start_date, end_date, currency, exchange_rate, status, allocation_method,
                 invested_amount, total_expenses, total_items, created_at, updated_at
             ) VALUES (
                 :tenant_id, :responsible_user_id, :name, :description, :country, :city,
-                :start_date, :end_date, :currency, :exchange_rate, :status,
+                :start_date, :end_date, :currency, :exchange_rate, :status, :allocation_method,
                 0, 0, 0, :created_at, :updated_at
             )',
             [
@@ -70,7 +88,8 @@ final class ImportRepository extends TenantScopedRepository
                 'end_date' => $data['end_date'] ?? null,
                 'currency' => strtoupper((string) $data['currency']),
                 'exchange_rate' => $data['exchange_rate'],
-                'status' => $data['status'] ?? 'PLANNED',
+                'status' => $data['status'] ?? self::STATUS_PLANNED,
+                'allocation_method' => $allocationMethod,
                 'created_at' => $timestamp,
                 'updated_at' => $timestamp,
             ],
@@ -100,6 +119,7 @@ final class ImportRepository extends TenantScopedRepository
                 currency = :currency,
                 exchange_rate = :exchange_rate,
                 status = :status,
+                allocation_method = :allocation_method,
                 updated_at = :updated_at
              WHERE tenant_id = :tenant_id AND id = :id',
             [
@@ -113,6 +133,31 @@ final class ImportRepository extends TenantScopedRepository
                 'currency' => strtoupper((string) ($data['currency'] ?? $current['currency'])),
                 'exchange_rate' => $data['exchange_rate'] ?? $current['exchange_rate'],
                 'status' => $data['status'] ?? $current['status'],
+                'allocation_method' => $data['allocation_method'] ?? $current['allocation_method'],
+                'updated_at' => date('Y-m-d H:i:s'),
+                'id' => $importId,
+            ],
+        );
+
+        return $this->find($importId) ?? [];
+    }
+
+    /**
+     * Reabre uma importacao concluida para reprocessamento explicito. Os
+     * valores congelados permanecem ate uma nova conclusao.
+     *
+     * @return array<string, mixed>
+     */
+    public function reopen(int $importId): array
+    {
+        $this->findOrFail($importId);
+
+        $this->run(
+            'UPDATE imports
+             SET status = :status, completed_at = NULL, updated_at = :updated_at
+             WHERE tenant_id = :tenant_id AND id = :id',
+            [
+                'status' => self::STATUS_IN_PROGRESS,
                 'updated_at' => date('Y-m-d H:i:s'),
                 'id' => $importId,
             ],
@@ -244,71 +289,271 @@ final class ImportRepository extends TenantScopedRepository
         ];
     }
 
-    public function allocateExpenses(int $importId, float $expenseTotal): void
+    /**
+     * Lista de despesas com filtros e paginacao.
+     *
+     * @param array<string, mixed> $filters
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function expenses(int $importId, array $filters = [], int $limit = 15, int $offset = 0): array
     {
         $this->findOrFail($importId);
 
-        $items = $this->selectAll(
-            'SELECT id, quantity, total_cost_local
-             FROM import_items
-             WHERE tenant_id = :tenant_id AND import_id = :import_id
-             ORDER BY id',
-            ['import_id' => $importId],
+        [$where, $params] = $this->expenseFilter($filters);
+
+        return $this->selectAll(
+            'SELECT * FROM import_expenses
+             WHERE tenant_id = :tenant_id AND import_id = :import_id' . $where . '
+             ORDER BY id
+             LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset),
+            ['import_id' => $importId] + $params,
         );
-
-        $costBase = array_sum(array_map(
-            static fn (array $item): float => (float) $item['total_cost_local'],
-            $items,
-        ));
-
-        foreach ($items as $item) {
-            $ratio = $costBase > 0 ? ((float) $item['total_cost_local'] / $costBase) : 0;
-            $allocated = round($expenseTotal * $ratio, 2);
-            $realUnitCost = (float) $item['quantity'] > 0
-                ? round((((float) $item['total_cost_local']) + $allocated) / (float) $item['quantity'], 2)
-                : 0.00;
-
-            $this->run(
-                'UPDATE import_items
-                 SET allocated_expense = :allocated_expense,
-                     real_unit_cost = :real_unit_cost,
-                     updated_at = :updated_at
-                 WHERE tenant_id = :tenant_id AND id = :id',
-                [
-                    'allocated_expense' => $allocated,
-                    'real_unit_cost' => $realUnitCost,
-                    'updated_at' => date('Y-m-d H:i:s'),
-                    'id' => $item['id'],
-                ],
-            );
-        }
     }
 
     /**
-     * @return array<string, mixed>
+     * @param array<string, mixed> $filters
      */
-    public function complete(int $importId, float $investedAmount, float $expenseTotal, float $itemsTotal): array
+    public function countExpenses(int $importId, array $filters = []): int
     {
         $this->findOrFail($importId);
 
-        $this->run(
-            'UPDATE imports
-             SET status = :status,
-                 invested_amount = :invested_amount,
-                 total_expenses = :total_expenses,
-                 total_items = :total_items,
-                 updated_at = :updated_at
-             WHERE tenant_id = :tenant_id AND id = :id',
-            [
-                'status' => 'COMPLETED',
-                'invested_amount' => $investedAmount,
-                'total_expenses' => $expenseTotal,
-                'total_items' => $itemsTotal,
-                'updated_at' => date('Y-m-d H:i:s'),
-                'id' => $importId,
-            ],
+        [$where, $params] = $this->expenseFilter($filters);
+
+        return (int) $this->selectValue(
+            'SELECT COUNT(*) FROM import_expenses
+             WHERE tenant_id = :tenant_id AND import_id = :import_id' . $where,
+            ['import_id' => $importId] + $params,
         );
+    }
+
+    /**
+     * Lista de itens com filtros e paginacao.
+     *
+     * @param array<string, mixed> $filters
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function items(int $importId, array $filters = [], int $limit = 15, int $offset = 0): array
+    {
+        $this->findOrFail($importId);
+
+        [$where, $params] = $this->itemFilter($filters);
+
+        return $this->selectAll(
+            'SELECT * FROM import_items
+             WHERE tenant_id = :tenant_id AND import_id = :import_id' . $where . '
+             ORDER BY id
+             LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset),
+            ['import_id' => $importId] + $params,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    public function countItems(int $importId, array $filters = []): int
+    {
+        $this->findOrFail($importId);
+
+        [$where, $params] = $this->itemFilter($filters);
+
+        return (int) $this->selectValue(
+            'SELECT COUNT(*) FROM import_items
+             WHERE tenant_id = :tenant_id AND import_id = :import_id' . $where,
+            ['import_id' => $importId] + $params,
+        );
+    }
+
+    /**
+     * Calcula o rateio e congela os valores da importacao numa unica transacao.
+     *
+     * Todo o calculo (leitura dos itens, soma das despesas, gravacao do rateio e
+     * atualizacao dos totais) roda junto: uma falha no meio nao deixa a
+     * importacao parcialmente calculada.
+     *
+     * @return array<string, mixed>
+     */
+    public function freeze(int $importId, string $allocationMethod): array
+    {
+        if (!in_array($allocationMethod, self::ALLOCATION_METHODS, true)) {
+            throw new RuntimeException('Metodo de rateio invalido: ' . $allocationMethod);
+        }
+
+        $this->findOrFail($importId);
+
+        $pdo = $this->pdo();
+        $pdo->beginTransaction();
+
+        try {
+            $items = $this->selectAll(
+                'SELECT id, quantity, total_cost_local
+                 FROM import_items
+                 WHERE tenant_id = :tenant_id AND import_id = :import_id
+                 ORDER BY id',
+                ['import_id' => $importId],
+            );
+
+            if ($items === []) {
+                throw new RuntimeException('Adicione ao menos um item antes de concluir a importacao.');
+            }
+
+            $expenseTotal = (float) $this->selectValue(
+                'SELECT COALESCE(SUM(converted_amount), 0)
+                 FROM import_expenses
+                 WHERE tenant_id = :tenant_id AND import_id = :import_id',
+                ['import_id' => $importId],
+            );
+
+            $allocationCents = $this->allocateCents($items, $expenseTotal, $allocationMethod);
+
+            $totalCostLocal = 0.0;
+            $totalQuantity = 0.0;
+
+            foreach ($items as $index => $item) {
+                $allocated = $allocationCents[$index] / 100;
+                $quantity = (float) $item['quantity'];
+                $realUnitCost = $quantity > 0
+                    ? round(((float) $item['total_cost_local'] + $allocated) / $quantity, 2)
+                    : 0.00;
+
+                $this->run(
+                    'UPDATE import_items
+                     SET allocated_expense = :allocated_expense,
+                         real_unit_cost = :real_unit_cost,
+                         updated_at = :updated_at
+                     WHERE tenant_id = :tenant_id AND id = :id',
+                    [
+                        'allocated_expense' => $allocated,
+                        'real_unit_cost' => $realUnitCost,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                        'id' => $item['id'],
+                    ],
+                );
+
+                $totalCostLocal += (float) $item['total_cost_local'];
+                $totalQuantity += $quantity;
+            }
+
+            $this->run(
+                'UPDATE imports
+                 SET status = :status,
+                     allocation_method = :allocation_method,
+                     invested_amount = :invested_amount,
+                     total_expenses = :total_expenses,
+                     total_items = :total_items,
+                     completed_at = :completed_at,
+                     updated_at = :updated_at
+                 WHERE tenant_id = :tenant_id AND id = :id',
+                [
+                    'status' => self::STATUS_COMPLETED,
+                    'allocation_method' => $allocationMethod,
+                    'invested_amount' => round($totalCostLocal + $expenseTotal, 2),
+                    'total_expenses' => round($expenseTotal, 2),
+                    'total_items' => $totalQuantity,
+                    'completed_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                    'id' => $importId,
+                ],
+            );
+
+            $pdo->commit();
+        } catch (Throwable $throwable) {
+            $pdo->rollBack();
+
+            throw $throwable;
+        }
 
         return $this->find($importId) ?? [];
+    }
+
+    /**
+     * Distribui as despesas em centavos inteiros. Cada item recebe
+     * `round(base_do_item / base_total * total)`, exceto o ultimo, que absorve a
+     * diferenca — assim a soma dos rateios e EXATAMENTE o total de despesas, sem
+     * residuo de centavos. Trabalhar em centavos evita o erro de arredondamento
+     * de ponto flutuante.
+     *
+     * @param list<array<string, mixed>> $items
+     *
+     * @return list<int>
+     */
+    private function allocateCents(array $items, float $expenseTotal, string $allocationMethod): array
+    {
+        $expenseCents = (int) round($expenseTotal * 100);
+
+        $bases = array_map(
+            static fn (array $item): float => $allocationMethod === self::ALLOCATION_QUANTITY
+                ? (float) $item['quantity']
+                : (float) $item['total_cost_local'],
+            $items,
+        );
+
+        $baseSum = array_sum($bases);
+
+        if ($baseSum <= 0) {
+            throw new RuntimeException(
+                'Nao ha base para o rateio por ' . strtolower($allocationMethod)
+                . ': confira quantidade e custo dos itens.'
+            );
+        }
+
+        $count = count($items);
+        $remaining = $expenseCents;
+        $allocations = [];
+
+        for ($index = 0; $index < $count; $index++) {
+            if ($index === $count - 1) {
+                $allocations[$index] = $remaining;
+                continue;
+            }
+
+            $share = (int) round($expenseCents * ($bases[$index] / $baseSum));
+            $allocations[$index] = $share;
+            $remaining -= $share;
+        }
+
+        return $allocations;
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     *
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    private function expenseFilter(array $filters): array
+    {
+        $where = '';
+        $params = [];
+
+        if (!empty($filters['category'])) {
+            $where .= ' AND category = :category';
+            $params['category'] = (string) $filters['category'];
+        }
+
+        if (!empty($filters['status'])) {
+            $where .= ' AND status = :status';
+            $params['status'] = strtoupper((string) $filters['status']);
+        }
+
+        return [$where, $params];
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     *
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    private function itemFilter(array $filters): array
+    {
+        $where = '';
+        $params = [];
+
+        if (!empty($filters['sku'])) {
+            $where .= ' AND sku = :sku';
+            $params['sku'] = (string) $filters['sku'];
+        }
+
+        return [$where, $params];
     }
 }

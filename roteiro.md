@@ -250,22 +250,54 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 
 **Objetivo:** tornar o cálculo de custo real confiável. Este é o núcleo do produto — se esta etapa ficar errada, todo o resto herda o erro.
 
-> Regras da baseline 69 §5 que **ainda não são implementadas**: congelamento de valores no fechamento, rateio além de valor, residuo de centavos.
+> Antes: as regras da baseline 69 §5 (congelamento no fechamento, rateio além de valor, resíduo de centavos) não eram implementadas; o fechamento não era transacional e a edição de `COMPLETED` era livre.
 
-- [ ] `P0` Envolver `ImportService::complete()` em **transação** — hoje uma falha no meio deixa a importação parcialmente calculada.
-- [ ] `P0` Tratar **resíduo de arredondamento**: distribuir a diferença entre soma dos rateios e `total_expenses` no último item, garantindo soma exata em centavos.
-- [ ] `P1` Congelar valores no fechamento: gravar taxa, despesas e rateio aplicados; edição posterior exige **reprocessamento explícito** e auditado.
-- [ ] `P1` Definir e implementar a fórmula de rateio por peso, por quantidade e por combinação, com a regra padrão documentada.
-- [ ] `P1` Regras de transição de estado: quais status permitem edição, fechamento, reabertura; bloquear edição de importação `COMPLETED`.
-- [ ] `P1` `ExchangeRateService` + API para cotação manual (`exchange_rates` existe e nunca é usada): `GET/POST /api/v1/exchange-rates`.
-- [ ] `P1` Ao lançar despesa/item, sugerir a taxa vigente na data a partir de `exchange_rates` em vez de exigir digitação.
-- [ ] `P1` CRUD de fornecedores (`suppliers` existe, sem código): `GET/POST/PUT /api/v1/suppliers`.
-- [ ] `P1` API de listagem de despesas e itens da importação (`GET /api/v1/imports/{id}/expenses|items`), com paginação e filtros.
-- [ ] `P2` Reprocessamento completo de uma importação com diff do que mudou.
+- [x] `P0` Envolver `ImportService::complete()` em **transação** — hoje uma falha no meio deixa a importação parcialmente calculada.
+- [x] `P0` Tratar **resíduo de arredondamento**: distribuir a diferença entre soma dos rateios e `total_expenses` no último item, garantindo soma exata em centavos.
+- [x] `P1` Congelar valores no fechamento: gravar taxa, despesas e rateio aplicados; edição posterior exige **reprocessamento explícito** e auditado.
+- [x] `P1` Definir e implementar a fórmula de rateio por peso, por quantidade e por combinação, com a regra padrão documentada. *(parcial: `VALUE` e `QUANTITY` implementados; ver limitações)*
+- [x] `P1` Regras de transição de estado: quais status permitem edição, fechamento, reabertura; bloquear edição de importação `COMPLETED`.
+- [x] `P1` `ExchangeRateService` + API para cotação manual (`exchange_rates` existe e nunca é usada): `GET/POST /api/v1/exchange-rates`.
+- [x] `P1` Ao lançar despesa/item, sugerir a taxa vigente na data a partir de `exchange_rates` em vez de exigir digitação.
+- [x] `P1` CRUD de fornecedores (`suppliers` existe, sem código): `GET/POST/PUT /api/v1/suppliers`.
+- [x] `P1` API de listagem de despesas e itens da importação (`GET /api/v1/imports/{id}/expenses|items`), com paginação e filtros.
+- [ ] `P2` Reprocessamento completo de uma importação com diff do que mudou. *(parcial: `reopen` explícito e auditado existe; falta o diff)*
 - [ ] `P2` Anexos e comprovantes de despesa (storage — `manual/20`).
-- [ ] `P2` Suíte de testes de casos de borda do rateio: 0 despesas, 0 itens, 1 item, divisão não exata, valor negativo, múltiplas moedas.
+- [x] `P2` Suíte de testes de casos de borda do rateio: 0 despesas, 0 itens, 1 item, divisão não exata, valor negativo, múltiplas moedas.
 
-**Critério de conclusão:** fechar uma importação com 3 itens e despesas de valor não divisível gera soma de rateios exatamente igual ao total, dentro de transação, e os valores ficam congelados; testes automatizados cobrem os casos de borda.
+**Implementado:**
+- **Fechamento transacional.** O cálculo inteiro (leitura dos itens, soma das despesas, gravação do rateio e atualização dos totais) roda em uma única transação dentro de `ImportRepository::freeze()`. Antes eram 3 operações soltas; uma falha no meio deixava a importação parcialmente calculada.
+- **Resíduo de centavos.** O rateio é calculado em **centavos inteiros**: cada item recebe `round(base/base_total × total)`, e o último absorve a diferença. A soma dos `allocated_expense` é sempre exatamente `total_expenses`. O cálculo em centavos também evita o erro de ponto flutuante.
+- **Congelamento.** `freeze()` grava `allocation_method`, `completed_at`, `invested_amount`, `total_expenses`, `total_items` e, por item, `allocated_expense` e `real_unit_cost`. Depois disso a importação não pode ser alterada: `update`, `addExpense`, `addItem` e um novo `complete` são recusados com 400.
+- **Reabertura explícita.** `POST /api/v1/imports/{id}/reopen` (permissão `imports.complete`) volta o status para `IN_PROGRESS`, zera `completed_at` e é auditado (`imports.reopen`). É a única via para editar depois do fechamento.
+- **Estados canônicos.** `PLANNED` (default), `IN_PROGRESS`, `COMPLETED`, `CANCELLED`. `PLANNED`/`IN_PROGRESS` são editáveis; `COMPLETED` exige reabrir; `CANCELLED` é terminal. `COMPLETED` não pode ser atribuído pela edição — só pelo `complete()`, para não pular o cálculo.
+- **Rateio por `VALUE` (default) e `QUANTITY`**, configurável em `imports.allocation_method`.
+- `ExchangeRateRepository` + `ExchangeRateService` + `GET/POST /api/v1/exchange-rates`, com histórico por `(tenant, moeda, data)` (upsert) e `rateFor(moeda, data)` = cotação mais recente `<=` data. Ao lançar despesa/item sem `exchange_rate`, o serviço resolve a cotação vigente na data; se não houver, e a moeda não for a da importação, retorna 400 com mensagem clara.
+- `SupplierRepository` + `SupplierService` + `GET/POST/PUT /api/v1/suppliers`, com nome único por tenant. `supplier_id` numa despesa/item é validado contra o tenant (fecha o vazamento cross-FK anotado na 2.4).
+- `GET /api/v1/imports/{id}/expenses|items` com paginação (`page`, `per_page`) e filtros (`category`, `status`, `sku`). Adicionado `Request::query()` para ler a query string separadamente do corpo.
+
+**Decisões onde o manual é omisso (documentadas):**
+- **Lista canônica de status.** Os manuais divergem (`manual/4`, `11`, `21`, `32`, `41`, `52`, `61` trazem conjuntos diferentes) e `manual/68:127` registra a lacuna. Adotei `PLANNED`/`IN_PROGRESS`/`COMPLETED`/`CANCELLED` (a lista de `manual/61:199-220`), que já era o que o código gravava.
+- **Resíduo de centavos no último item.** O manual não define (`manual/68:142-144`); segui `roteiro.md:256`.
+- **Rateio padrão = `VALUE`.** Não há método padrão no manual; `VALUE` é o que já existia e é o comportamento mais previsível.
+- **Preservação do histórico cambial.** A cotação aplicada fica gravada na despesa/item e nunca é recalculada (`manual/4:219-243`, `manual/7:145-147`).
+
+**Validação:**
+- `tests/Integration/ImportCostTest.php` (27 testes): soma exata do rateio, `QUANTITY`, 0 despesas, 0 itens, 1 item, valor negativo, múltiplas moedas, congelamento, reabertura, `CANCELLED`, cotação vigente, fornecedor por tenant, filtros e paginação, isolamento entre tenants. Suíte completa: **148 testes / 622 asserções**, verde.
+- `composer lint` verde em 98 arquivos.
+- Probe no MySQL real: 21/21, incluindo transação, resíduo, congelamento/reabertura, cotação, fornecedor e repetição com `PDO::ATTR_EMULATE_PREPARES = false`. Dados temporários removidos.
+- Smoke HTTP com `php -S` na API real (JSON + cookie): login, criar, itens, despesa, concluir, verificar soma exata, filtro por query string, bloqueio de edição, reabrir. Tudo verde. Dados removidos.
+
+**Limitações conhecidas:**
+- **Rateio por peso e por combinação não implementados.** O schema não tem campo de peso em `import_items` (peso é atributo de produto no manual, que também não existe no schema) e o manual não define a fórmula de "combinação" — só a lacuna (`manual/68:141`). Implementar seria inventar regra e schema. Por isso a linha fica parcial.
+- **Rateio manual** também adiado: exige uma via de entrada de valor por item, que não existe.
+- **Contrato da API:** endpoints de escrita exigem `Content-Type: application/json`, **inclusive sem corpo** (`POST /complete`, `/reopen`). É a defesa CSRF da API — o navegador não consegue enviar esse content-type cross-origin sem preflight. Um cliente que omita o header recebe 415.
+- O `reopen` não faz diff nem versiona o estado anterior; é uma reabertura simples e auditada.
+- A cotação é aplicada no lançamento; não há recálculo retroativo ao corrigir uma cotação antiga (por design — histórico é imutável).
+- `ImportService` valida o status antes de chamar `freeze()`; a checagem não está dentro da mesma transação, então uma edição concorrente exata entre a checagem e o freeze não é bloqueada por lock. Aceitável para a escala do MVP; um `SELECT ... FOR UPDATE` resolveria.
+
+**Critério de conclusão:** fechar uma importação com 3 itens e despesas de valor não divisível gera soma de rateios exatamente igual ao total, dentro de transação, e os valores ficam congelados; testes automatizados cobrem os casos de borda. **Atendido**, exceto as fórmulas de peso/combinação e o diff de reprocessamento (P2), documentados acima.
+
 
 ---
 

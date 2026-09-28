@@ -73,6 +73,7 @@ abstract class ApiIntegrationTestCase extends TestCase
     {
         $_POST = [];
         $_GET = [];
+        parse_str((string) (parse_url($uri, PHP_URL_QUERY) ?? ''), $_GET);
         $_SERVER['REQUEST_METHOD'] = strtoupper($method);
         $_SERVER['REQUEST_URI'] = $uri;
         $_SERVER['CONTENT_TYPE'] = 'application/json';
@@ -233,7 +234,8 @@ abstract class ApiIntegrationTestCase extends TestCase
             'CREATE TABLE password_resets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, used_at TEXT, created_at TEXT)',
             'CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER, user_id INTEGER, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id INTEGER, metadata TEXT, created_at TEXT)',
             'CREATE TABLE suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, name TEXT NOT NULL, country TEXT, city TEXT, contact_name TEXT, email TEXT, phone TEXT, notes TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
-            'CREATE TABLE imports (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, responsible_user_id INTEGER, name TEXT NOT NULL, description TEXT, country TEXT NOT NULL, city TEXT, start_date TEXT NOT NULL, end_date TEXT, currency TEXT NOT NULL, exchange_rate REAL NOT NULL, status TEXT NOT NULL, invested_amount REAL NOT NULL DEFAULT 0, total_expenses REAL NOT NULL DEFAULT 0, total_items REAL NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE imports (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, responsible_user_id INTEGER, name TEXT NOT NULL, description TEXT, country TEXT NOT NULL, city TEXT, start_date TEXT NOT NULL, end_date TEXT, currency TEXT NOT NULL, exchange_rate REAL NOT NULL, status TEXT NOT NULL, allocation_method TEXT NOT NULL DEFAULT \'VALUE\', invested_amount REAL NOT NULL DEFAULT 0, total_expenses REAL NOT NULL DEFAULT 0, total_items REAL NOT NULL DEFAULT 0, completed_at TEXT, created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE exchange_rates (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, currency TEXT NOT NULL, rate REAL NOT NULL, reference_date TEXT NOT NULL, source TEXT, created_at TEXT, UNIQUE(tenant_id, currency, reference_date))',
             'CREATE TABLE import_expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, import_id INTEGER NOT NULL, supplier_id INTEGER, category TEXT NOT NULL, description TEXT NOT NULL, currency TEXT NOT NULL, amount REAL NOT NULL, exchange_rate REAL NOT NULL, converted_amount REAL NOT NULL, expense_date TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE import_items (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, import_id INTEGER NOT NULL, supplier_id INTEGER, product_name TEXT NOT NULL, sku TEXT, quantity REAL NOT NULL, unit_cost_foreign REAL NOT NULL, exchange_rate REAL NOT NULL, unit_cost_local REAL NOT NULL, total_cost_local REAL NOT NULL, allocated_expense REAL NOT NULL DEFAULT 0, real_unit_cost REAL NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, category_id INTEGER, brand_id INTEGER, supplier_id INTEGER, default_import_item_id INTEGER, sku TEXT NOT NULL, barcode TEXT, name TEXT NOT NULL, description TEXT, unit TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
