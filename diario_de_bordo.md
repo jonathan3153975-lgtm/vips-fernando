@@ -5,7 +5,7 @@ plano de tarefas) e o `manual/` (que é a especificação). Aqui fica o que
 **aconteceu de fato**, na ordem, com as decisões tomadas e o estado real do
 código.
 
-- **Última atualização:** 2026-09-27
+- **Última atualização:** 2026-09-28
 - **Fonte do plano:** `roteiro.md`
 - **Documento pedido pela Etapa 0** como `manual/71 — Diário de Bordo.md`; está
   aqui na raiz com o nome `diario_de_bordo.md`.
@@ -140,20 +140,64 @@ Executada fora da ordem do roteiro: **2.4 → 2.1 → 2.3 → 2.2**.
 
 ---
 
-## Estado atual do repositório (2026-09-27)
+### Etapa 4 — Catálogo, produtos e preços (EPIC 05)
+**SEM COMMIT** (working tree, 2026-09-28)
+
+- **Categorias e marcas** ganharam repository/service/API. A categoria valida o pai
+  e bloqueia ciclo (não pode ser pai de si mesma nem ser movida para baixo de si
+  mesma). `status` é validado e gravado em maiúsculo no `create` e no `update`.
+- **O preço passou a ser gravado, não só sugerido** — era o buraco real desta etapa.
+  `ProductService::withPricedDefaults()` escreve a linha de `product_prices` antes
+  de salvar: custo explícito tem precedência, senão entra o custo real do item
+  concluído; com `margin` calcula `sale_price`/`minimum_price`; com `sale_price`
+  explícito recalcula a margem para o preço salvo (`PricingService::forSalePrice()`).
+- **Trocar o item de importaçãovinculado recalcula o custo** — antes o
+  `product_prices` continuava descrevendo o item antigo.
+- Cadastro de produto + preço + estoque em **uma transação**.
+- `default_import_item_id` passou a ser de fato gravado (antes era aceito e
+  ignorado). Exclusão → desativação: 400 quando há estoque, movimentação ou venda;
+  sem isso, `INACTIVE` preservando o registro.
+- Filtros (categoria, marca, status, busca), paginação, `GET /products/{id}`,
+  `GET /products/{id}/price-suggestion` e tela `GET/POST /produtos`.
+- Decisão do usuário: **mark-up sobre custo** (`preço = custo × (1 + margem/100)`).
+- Estado verde: 197 testes / 799 asserções; `composer lint` em 107 arquivos;
+  probe MySQL 27/27; smoke HTTP 22/22.
+
+#### Os três bugs que o MySQL pegou e o SQLite deixou passar
+
+O probe no MySQL real se pagou várias vezes nesta etapa. Vale registrar, porque o
+padrão — *teste SQLite verde, produção quebrada* — é o que mais custaria tempo:
+
+1. **`sale_items` não tem `tenant_id`** (o escopo vem de `sales`). A verificação de
+   exclusão consultava `si.tenant_id` e lançaria erro em qualquer banco real.
+   **O fixture de teste também estava errado**, repetindo o erro — por isso os 49
+   testes passavam. Corrigi o repositório e alinhei o schema de teste ao real.
+2. **Placeholder repetido** — a busca escrevia
+   `(p.name LIKE :search OR p.sku LIKE :search)`. Com
+   `ATTR_EMULATE_PREPARES = false` isso é `HY093`; o SQLite reutiliza o marcador e
+   não acusa nada. Dois placeholders distintos resolveram.
+3. Depois de corrigir 1 e 2 o `HY093` voltou em outro ponto, o que provou que a
+   causa era a classe do bug (marcador repetido), não a consulta de vendas.
+
+**Lição registrada:** após o achado, auditei os 14 repositories — 131 queries, nenhum
+placeholder repetido. Quando um `HY093` aparece, ele é da família, não da linha.
+
+---
+
+## Estado atual do repositório (2026-09-28)
 
 | Métrica | Valor |
 |---|---|
-| Suíte de testes | 148 testes / 622 asserções, verde |
-| `composer lint` | 98 arquivos, sem erro de sintaxe |
-| Migrations | 15 (`000001` a `000015`) |
+| Suíte de testes | 197 testes / 799 asserções, verde |
+| `composer lint` | 107 arquivos, sem erro de sintaxe |
+| Migrations | 15 (`000001` a `000015`) — a Etapa 4 não exigiu nenhuma |
 | Tabelas | 30 |
-| Rotas | 57 (37 de API) |
-| Permissões semeadas | 22 |
-| Arquivos PHP em `app/` | 55 |
-| Arquivos de teste | 14 |
-| Último commit | `e39f066 etapa 2` |
-| Banco MySQL local | restaurado ao estado do seed (1 tenant, 5 perfis, 1 usuário, 22 permissões) |
+| Rotas | 69 (48 de API) |
+| Permissões semeadas | 22 — a Etapa 4 reusou `products.*`, nenhuma nova |
+| Arquivos PHP em `app/` | 63 |
+| Arquivos de teste | 15 |
+| Último commit | `5e38611 etapa 3` |
+| Banco MySQL local | no estado do seed (1 tenant, 5 perfis, 1 usuário, 22 permissões) |
 
 Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
 `tenants`), `000014` (`users.auth_version`), `000015`
@@ -161,10 +205,12 @@ Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
 
 ## Onde parou
 
-- **Etapa 3 implementada e validada, mas ainda NÃO commitada.** O working tree tem
-  8 arquivos modificados e 8 novos (`git status`). É o ponto exato de retomada.
-- Próxima etapa do roteiro: **Etapa 4 — Catálogo, produtos e preços (EPIC 05)**.
-- Antes de seguir, decisão pendente do usuário: commitar a Etapa 3 primeiro.
+- **Etapa 4 implementada e validada, mas ainda NÃO commitada.** O working tree tem
+  6 arquivos modificados e 9 novos (`git status`). É o ponto exato de retomada.
+- A Etapa 3 está commitada em `5e38611` (17 arquivos, incluindo o diário).
+- Próxima etapa do roteiro: **Etapa 5 — Estoque transacional e rastreabilidade
+  (EPIC 06)**, marcada como `MVP ★` — sem ela o MVP não entrega valor.
+- Antes de seguir, decisão pendente do usuário: commitar a Etapa 4.
 
 ## Decisões técnicas consolidadas
 
@@ -179,6 +225,15 @@ Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
 - `imports.status` canônico: `PLANNED`/`IN_PROGRESS`/`COMPLETED`/`CANCELLED`.
 - Contrato de validação antes de escrita: services validam tudo antes de tocar o
   banco; operações multi-passo usam transação.
+- **Margem = mark-up sobre custo** (decisão do usuário na Etapa 4):
+  `preço = custo × (1 + margem/100)` e `margem = (preço − custo)/custo × 100`.
+  Os manuais aceitam as duas leituras; esta é a coerente com os exemplos de
+  "preço sugerido" e com a coluna `product_prices.margin`.
+- **Tabelas de apoio reusam as permissões do domínio que as alimenta.** Categoria e
+  marca usam `products.view/create/edit`: quem não vê produtos não vê o catálogo.
+- **`default_import_item_id` é informado, não derivado.** Escolher o item por SKU
+  seria ambíguo: itens de importações diferentes podem trazer o mesmo SKU de
+  fabricante, e o custo seria semeado errado sem aviso.
 
 ## Pendências e limitações conhecidas
 
@@ -198,8 +253,24 @@ Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
   - Reprocessamento com **diff** não existe; há só `reopen` simples e auditado.
   - Checagem de status fora da transação do `freeze()` (sem `SELECT ... FOR UPDATE`).
   - Anexos/comprovantes de despesa (storage) não implementados.
+- **Etapa 4**
+  - **Sem alerta de preço abaixo do mínimo.** A margem efetiva é calculada e gravada,
+    mas nada impede vender abaixo de `minimum_price` — a verificação pertence à Etapa 7
+    (vendas/checkout), onde a venda é efetuada.
+  - `P2` Importação/exportação de catálogo em CSV/Excel e código de barras com scanner
+    não iniciados. O schema já tem `products.barcode`, guardado mas sem uso.
+  - `product_prices` é 1:1 com produto: não há histórico de tabela de preços nem
+    validade por período.
+  - `DELETE` sempre desativa, mesmo sem histórico. Deliberado: exclusão física
+    quebraria `sale_items`/`stock_movements`.
+  - Checagem de unicidade de SKU e de status fora da transação de gravação — duas
+    requisições simultâneas com o mesmo SKU podem passar pela checagem e uma falhar
+    no índice único (a mensagem de erro resultante é a do driver, não a de domínio).
 - **Transversal**
   - PHPStan/PHPCS pendentes de instalação.
+  - **Fixture de teste pode divergir do schema real** e esconder bugs. Ao adicionar
+    coluna, conferir `ApiIntegrationTestCase` contra a migration. Foi exatamente isso
+    que escondeu o erro de `si.tenant_id` na Etapa 4.
 
 ## Bloqueios
 
@@ -212,23 +283,24 @@ Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
 
 ## Próximo passo
 
-1. Commitar a Etapa 3 (ou revisar antes).
-2. Seguir para a **Etapa 4 — Catálogo, produtos e preços (EPIC 05)**.
-3. Itens de dívida que convém atacar cedo: rateio por peso/combinação (definir o
-   campo de peso) e rate limit de login.
+1. Commitar a Etapa 4 (ou revisar antes).
+2. Seguir para a **Etapa 5 — Estoque transacional e rastreabilidade (EPIC 06)**,
+   marcada `MVP ★`: fecha a cadeia custo real → produto → estoque.
+3. Dívida que convém atacar cedo: rateio por peso/combinação (definir o campo de
+   peso) e rate limit de login.
 
 ## Como validar
 
 ```powershell
 composer lint                          # sintaxe
-composer test                          # 148 testes / 622 asserções
+composer test                          # 197 testes / 799 asserções
 composer migrate                       # aplica migrations pendentes
 composer seed                          # idempotente
 php -S localhost:8000 -t public public/index.php   # smoke manual
 ```
 
 - Probe de banco e smoke HTTP foram executados com scripts temporários fora do
-  repositório e removidos ao final; o banco local foi restaurado ao seed.
+  repositório; o banco local é conferido e restaurado ao seed ao final.
 
 ## Convenções de verificação usadas nesta base
 
@@ -237,3 +309,11 @@ php -S localhost:8000 -t public public/index.php   # smoke manual
 - Dados de teste/probe são sempre removidos; o banco volta ao estado do seed.
 - Escrever teste que reproduz o caminho **real** (ex.: corpo urlencoded presente,
   como no SAPI) — vários bugs só apareceram por causa disso.
+- **O probe no MySQL real não é redundante com o SQLite.** Ele é o que pega:
+  - coluna que o schema real não tem (e que o fixture repetia por engano);
+  - placeholder repetido, que o SQLite aceita e o MySQL recusa (`HY093`);
+  - diferença de DECIMAL/REAL, `LIKE` com acento e `LIMIT`/`OFFSET`.
+- Ao cadastrar coluna nova, conferir o fixture de teste contra a migration — o
+  caminho de falha mais silencioso que existe aqui: teste verde, banco quebrado.
+- Ao aparecer um `HY093`, tratar como família (marcador repetido em qualquer query),
+  não como bug da linha em que ele estourou. Auditar todos os repositories.

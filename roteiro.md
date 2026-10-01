@@ -305,16 +305,61 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 
 **Objetivo:** estruturar o que é comercializado e formar preço de venda a partir do custo real.
 
-- [ ] `P1` CRUD de categorias (`GET/POST/PUT /api/v1/categories`) e marcas (`/api/v1/brands`).
-- [ ] `P1` Preenchimento automático de `default_import_item_id` ao criar produto a partir de um item de importação.
-- [ ] `P1` `PricingService`: calcular preço sugerido a partir do custo real (vindo do rateio da importação) + margem, gravando `cost_price`, `sale_price`, `minimum_price` e `margin` em `product_prices`.
-- [ ] `P1` Na criação/edição de produto, defaulted `cost_price` com o custo real quando o produto está vinculado a um item de importação.
-- [ ] `P1` Listagem com filtros (categoria, marca, status, busca textual) e paginação padronizada.
-- [ ] `P1` Bloquear exclusão de produto com estoque ou histórico de venda; desativar em vez de excluir.
-- [ ] `P1` Tela de listagem e formulário de produto com categorias/marcas em selects.
-- [ ] `P2` Cálculo de margem efetiva e alerta de preço abaixo do mínimo.
+- [x] `P1` CRUD de categorias (`GET/POST/PUT /api/v1/categories`) e marcas (`/api/v1/brands`).
+- [x] `P1` Preenchimento automático de `default_import_item_id` ao criar produto a partir de um item de importação.
+- [x] `P1` `PricingService`: calcular preço sugerido a partir do custo real (vindo do rateio da importação) + margem, gravando `cost_price`, `sale_price`, `minimum_price` e `margin` em `product_prices`.
+- [x] `P1` Na criação/edição de produto, defaulted `cost_price` com o custo real quando o produto está vinculado a um item de importação.
+- [x] `P1` Listagem com filtros (categoria, marca, status, busca textual) e paginação padronizada.
+- [x] `P1` Bloquear exclusão de produto com estoque ou histórico de venda; desativar em vez de excluir.
+- [x] `P1` Tela de listagem e formulário de produto com categorias/marcas em selects.
+- [ ] `P2` Cálculo de margem efetiva e alerta de preço abaixo do mínimo. *(parcial: a margem efetiva é calculada e gravada; falta o alerta)*
 - [ ] `P2` Importação/exportação de catálogo em CSV/Excel.
 - [ ] `P2` Código de barras e leitura por scanner.
+
+**Critério de conclusão:** produto vinculado a item de importação recebe `cost_price` igual ao custo real rateado; produto com histórico não pode ser excluído; listagem filtra e pagina. **Atendido.**
+
+### Execução — 2026-09-28
+
+**Implementado:**
+- `CategoryRepository` + `CategoryService` + `CategoryApiController`: CRUD com nome único por tenant, validação de pai existente e **bloqueio de ciclo** (a categoria não pode ser pai de si mesma nem ser movida para baixo de si mesma). `status` é validado e gravado normalizado em maiúsculo tanto no `create` quanto no `update`.
+- `BrandRepository` + `BrandService` + `BrandApiController`: CRUD com nome único por tenant.
+- **Preço de venda agora é persistido, não só sugerido.** `ProductService::withPricedDefaults()` roda antes de gravar e escreve a linha de `product_prices`:
+  - `cost_price` explícito tem precedência; sem ele, usa o custo real do item de importação **concluído**;
+  - com `margin`, `sale_price` e `minimum_price` são calculados e gravados;
+  - com `sale_price` explícito, a margem gravada passa a ser a do preço realmente salvo (`PricingService::forSalePrice()`), para a linha de `product_prices` não descrever duas operações diferentes;
+  - margem negativa é recusada; margem sem custo real não inventa preço (fica 0,00).
+- **Trocar o item de importaçãovinculado recalcula o custo.** Antes, o `product_prices` continuava descrevendo o item antigo; agora `ProductRepository::update()` detecta a troca e refaz o custo quando nenhum custo explícito é enviado.
+- Cadastro de produto, preço e linha de estoque passam a gravar **em uma única transação** — antes um erro na gravação do preço deixaria o produto sem precificação.
+- `ProductRepository` reescrito: filtros (categoria, marca, status, busca), paginação, `find`, `stock`, validação de SKU, `default_import_item_id` de fato gravado (antes era ignorado) e desativação que preserva o registro.
+- **Exclusão → desativação.** `DELETE /api/v1/products/{id}` recusa (400) quando há estoque em aberto, movimentação ou venda, e **sempre** desativa (`INACTIVE`) em vez de apagar: o produto continua legível e o histórico não se quebra.
+- `GET /api/v1/products/{id}` e `GET /api/v1/products/{id}/price-suggestion` (leitura pura, parâmetros por `Request::query()`).
+- Tela `GET/POST /produtos` com filtros, selects de categoria/marca/fornecedor e formulário; item adicionado ao menu lateral.
+
+**Decisões onde o manual é omisso (documentadas):**
+- **Mark-up sobre custo.** Os manuais aceitam as duas leituras de "margem". Adotei mark-up sobre o custo — `preço = custo × (1 + margem/100)` e `margem = (preço − custo)/custo × 100` — por ser a leitura coerente com os exemplos de "preço sugerido" (`manual/62`, `manual/31`) e com a coluna `margin` de `product_prices`. Decisão do usuário.
+- **Sem peso em `import_items`** (herdado da Etapa 3): o custo real continua sendo o rateio por `VALUE`/`QUANTITY`; o peso de produto não tem onde ser gravado.
+- **Categorias e marcas reusam as permissões de produtos** (`products.view/create/edit`). Criar um par de permissões próprio só para duas tabelas de apoio adicionaria ruído ao RBAC sem ganho de segurança — quem não pode ver produtos também não pode ver o catálogo que os alimenta.
+- **`default_import_item_id` é informado pelo usuário** (o id do item), não derivado por SKU: dois itens da mesma importação podem trazer o mesmo SKU de fabricante, e escolher o errado semeeria o custo sem aviso.
+
+**Validação:**
+- `tests/Integration/ProductCatalogTest.php` (49 testes): catálogo com tenant e unicidade, isolamento cross-tenant, custo real, precedência do custo manual, persistência da margem, recálculo de margem para preço explícito, mínimo informado, margem negativa, troca de item recalculando custo, normalização de status, filtros, paginação, busca com acento, proteção de exclusão, desativação, permissões, isolamento e tela web.
+- Suíte completa: **197 testes / 799 asserções**, verde. `composer lint` verde em 107 arquivos.
+- **Probe no MySQL real: 27/27.** Este foi o passo que mais pagou: ele encontrou **três bugs que o SQLite deixava passar**.
+  1. **`sale_items` não tem `tenant_id`** — o escopo vem de `sales`. A verificação de exclusão consultava `si.tenant_id` e quebraria em produção. O schema de teste *também* estava errado, então o teste passava; corrigi os dois e alinhei o fixture de teste ao schema real.
+  2. **Placeholder repetido** — a busca escrevia `(p.name LIKE :search OR p.sku LIKE :search)`. Com `PDO::ATTR_EMULATE_PREPARES = false` isso é `HY093`. O SQLite reutiliza o marcador e não acusa nada.
+  3. Depois de corrigir 1 e 2, o mesmo `HY093` reapareceu em outro ponto, o que expôs que a causa era essa, não a consulta de vendas.
+- Auditoria dos 14 repositories: 131 queries, **nenhum placeholder repetido** (o risco é da classe, não daquele bug).
+- Smoke HTTP com `php -S` na aplicação real (JSON + cookie + CSRF): 22/22, incluindo login, CRUD de categoria/marca, importação concluída, custo real, sugestão por query string, margem persistida, filtros, busca, SKU duplicado, desativação, 404 e a tela `/produtos`. Dados removidos e banco conferido no estado do seed.
+
+**Limitações conhecidas:**
+- **Sem alerta de preço abaixo do mínimo.** A margem efetiva é calculada e gravada, mas nada impede vender abaixo de `minimum_price` — a verificação pertence à Etapa 7 (vendas/checkout), onde a venda é efetuada.
+- **Sem CSV/Excel e sem código de barras** (P2 não iniciado). O schema já tem `products.barcode`, guardado mas sem leitura por scanner.
+- **`DELETE` sempre desativa**, mesmo sem histórico. É deliberado: exclusão física quebraria `sale_items`/`stock_movements` e não há gain em remover a linha. O que impede o descarte acidental é a recusa com 400 no caso com histórico, para forçar a desativação explícita.
+- A checagem de unicidade de SKU e a de status rodam fora da transação de gravação: duas requisições simultâneas com o mesmo SKU podem passar pela checagem e uma falhar no índice único. O banco é a rede de segurança; a mensagem de erro resultante é a do driver, não a de domínio.
+- `product_prices` guarda uma única linha por produto (o schema é 1:1). Não há histórico de tabela de preços nem validade por período.
+
+---
+
 
 **Critério de conclusão:** produto vinculado a item de importação recebe `cost_price` igual ao custo real rateado; produto com histórico não pode ser excluído; listagem filtra e pagina.
 
@@ -450,11 +495,11 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 ## Resumo visual
 
 ```
-ETAPA 0  Diário de bordo                 ░░░░░░░░░░  (~0,5 dia)
-ETAPA 1  Higiene e CI                    ▓▓▓░░░░░░░  (~2 dias)   P0
-ETAPA 2  Auth + RBAC + Tenant            ▓▓▓▓▓░░░░░  (~5 dias)   MVP
-ETAPA 3  Núcleo de custo (rateio)        ▓▓▓▓▓▓░░░░  (~5 dias)   ★ núcleo do produto
-ETAPA 4  Produtos e preços               ▓▓▓░░░░░░░  (~3 dias)   MVP
+ETAPA 0  Diário de bordo                 ██████████  (~0,5 dia)
+ETAPA 1  Higiene e CI                    ██████████  (~2 dias)   P0
+ETAPA 2  Auth + RBAC + Tenant            ██████████  (~5 dias)   MVP
+ETAPA 3  Núcleo de custo (rateio)        ██████████  (~5 dias)   ★ núcleo do produto
+ETAPA 4  Produtos e preços               ██████████  (~3 dias)   MVP
 ETAPA 5  Estoque transacional            ▓▓▓▓▓░░░░░  (~5 dias)   MVP ★
 ETAPA 6  Clientes e CRM                  ▓▓▓░░░░░░░  (~3 dias)   MVP
 ETAPA 7  Vendas e checkout               ▓▓▓▓▓▓▓░░░  (~7 dias)   MVP ★

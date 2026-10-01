@@ -5,6 +5,8 @@ declare(strict_types=1);
 use App\Core\Application;
 use App\Core\Session;
 use App\Controllers\Api\AuthApiController;
+use App\Controllers\Api\BrandApiController;
+use App\Controllers\Api\CategoryApiController;
 use App\Controllers\Api\ExchangeRateApiController;
 use App\Controllers\Api\ImportApiController;
 use App\Controllers\Api\ProductApiController;
@@ -15,6 +17,7 @@ use App\Controllers\AuthController;
 use App\Controllers\DashboardController;
 use App\Controllers\HealthController;
 use App\Controllers\HomeController;
+use App\Controllers\ProductController;
 use App\Controllers\RoleController;
 use App\Controllers\TenantController;
 use App\Controllers\UserController;
@@ -23,6 +26,8 @@ use App\Middlewares\CsrfMiddleware;
 use App\Middlewares\GuestMiddleware;
 use App\Middlewares\PermissionMiddleware;
 use App\Repositories\AuditLogRepository;
+use App\Repositories\BrandRepository;
+use App\Repositories\CategoryRepository;
 use App\Repositories\ExchangeRateRepository;
 use App\Repositories\ImportRepository;
 use App\Repositories\PasswordResetRepository;
@@ -33,10 +38,13 @@ use App\Repositories\SupplierRepository;
 use App\Repositories\TenantRepository;
 use App\Repositories\UserRepository;
 use App\Services\AuthService;
+use App\Services\BrandService;
+use App\Services\CategoryService;
 use App\Services\ExchangeRateService;
 use App\Services\HealthService;
 use App\Services\ImportService;
 use App\Services\PasswordResetService;
+use App\Services\PricingService;
 use App\Services\ProductService;
 use App\Services\RoleService;
 use App\Services\SupplierService;
@@ -57,7 +65,20 @@ $exchangeRateService = new ExchangeRateService($exchangeRateRepository, $auditLo
 $supplierRepository = new SupplierRepository();
 $supplierService = new SupplierService($supplierRepository, $auditLogRepository);
 $importService = new ImportService(new ImportRepository(), $auditLogRepository, $exchangeRateService, $supplierRepository);
-$productService = new ProductService(new ProductRepository(), $auditLogRepository);
+$productRepository = new ProductRepository();
+$categoryRepository = new CategoryRepository();
+$brandRepository = new BrandRepository();
+$categoryService = new CategoryService($categoryRepository, $auditLogRepository);
+$brandService = new BrandService($brandRepository, $auditLogRepository);
+$pricingService = new PricingService($productRepository);
+$productService = new ProductService(
+    $productRepository,
+    $categoryRepository,
+    $brandRepository,
+    $supplierRepository,
+    $auditLogRepository,
+    $pricingService,
+);
 $roleRepository = new RoleRepository();
 $tenantService = new TenantService(
     $tenantRepository,
@@ -159,6 +180,40 @@ $router->put('/api/v1/suppliers/{id}', static fn (int $id): array => (new Suppli
 	$permission('imports.create'),
 ]);
 
+$router->get('/api/v1/categories', static fn (): array => (new CategoryApiController($categoryService))->index(), [
+	$auth,
+	$permission('products.view'),
+]);
+$router->post('/api/v1/categories', static fn (): array => (new CategoryApiController($categoryService))->store(), [
+	$auth,
+	$permission('products.create'),
+]);
+$router->get('/api/v1/categories/{id}', static fn (int $id): array => (new CategoryApiController($categoryService))->show($id), [
+	$auth,
+	$permission('products.view'),
+]);
+$router->put('/api/v1/categories/{id}', static fn (int $id): array => (new CategoryApiController($categoryService))->update($id), [
+	$auth,
+	$permission('products.edit'),
+]);
+
+$router->get('/api/v1/brands', static fn (): array => (new BrandApiController($brandService))->index(), [
+	$auth,
+	$permission('products.view'),
+]);
+$router->post('/api/v1/brands', static fn (): array => (new BrandApiController($brandService))->store(), [
+	$auth,
+	$permission('products.create'),
+]);
+$router->get('/api/v1/brands/{id}', static fn (int $id): array => (new BrandApiController($brandService))->show($id), [
+	$auth,
+	$permission('products.view'),
+]);
+$router->put('/api/v1/brands/{id}', static fn (int $id): array => (new BrandApiController($brandService))->update($id), [
+	$auth,
+	$permission('products.edit'),
+]);
+
 $router->get('/api/v1/products', static fn (): array => (new ProductApiController($productService))->index(), [
 	$auth,
 	$permission('products.view'),
@@ -167,13 +222,34 @@ $router->post('/api/v1/products', static fn (): array => (new ProductApiControll
 	$auth,
 	$permission('products.create'),
 ]);
+$router->get('/api/v1/products/{id}', static fn (int $id): array => (new ProductApiController($productService))->show($id), [
+	$auth,
+	$permission('products.view'),
+]);
 $router->put('/api/v1/products/{id}', static fn (int $id): array => (new ProductApiController($productService))->update($id), [
+	$auth,
+	$permission('products.edit'),
+]);
+$router->delete('/api/v1/products/{id}', static fn (int $id): array => (new ProductApiController($productService))->destroy($id), [
 	$auth,
 	$permission('products.edit'),
 ]);
 $router->get('/api/v1/products/{id}/stock', static fn (int $id): array => (new ProductApiController($productService))->stock($id), [
 	$auth,
 	$permission('stock.view'),
+]);
+$router->get('/api/v1/products/{id}/price-suggestion', static fn (int $id): array => (new ProductApiController($productService))->suggestPrice($id), [
+	$auth,
+	$permission('products.view'),
+]);
+
+$router->get('/produtos', static fn (): array => (new ProductController($productService, $categoryService, $brandService, $supplierService, $authService, $session))->index(), [
+	$auth,
+	$permission('products.view'),
+]);
+$router->post('/produtos', static fn (): array => (new ProductController($productService, $categoryService, $brandService, $supplierService, $authService, $session))->store(), [
+	$auth,
+	$permission('products.create'),
 ]);
 
 $userService = new UserService($userRepository, $roleRepository, $auditLogRepository);

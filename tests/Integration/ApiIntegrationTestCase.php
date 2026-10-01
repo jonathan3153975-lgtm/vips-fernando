@@ -241,6 +241,13 @@ abstract class ApiIntegrationTestCase extends TestCase
             'CREATE TABLE products (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, category_id INTEGER, brand_id INTEGER, supplier_id INTEGER, default_import_item_id INTEGER, sku TEXT NOT NULL, barcode TEXT, name TEXT NOT NULL, description TEXT, unit TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE product_prices (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER NOT NULL UNIQUE, cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0, minimum_price REAL NOT NULL DEFAULT 0, margin REAL NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE stock (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, product_id INTEGER NOT NULL, quantity REAL NOT NULL DEFAULT 0, reserved_quantity REAL NOT NULL DEFAULT 0, minimum_quantity REAL NOT NULL DEFAULT 0, updated_at TEXT, UNIQUE(tenant_id, product_id))',
+            'CREATE TABLE stock_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, product_id INTEGER NOT NULL, import_item_id INTEGER, sale_item_id INTEGER, user_id INTEGER, type TEXT NOT NULL, quantity REAL NOT NULL, balance_after REAL NOT NULL, reference_type TEXT NOT NULL, reference_id INTEGER, notes TEXT, created_at TEXT)',
+            'CREATE TABLE categories (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL, description TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE brands (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, name TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, customer_id INTEGER, user_id INTEGER, sale_number TEXT, status TEXT NOT NULL, subtotal REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0, total REAL NOT NULL DEFAULT 0, cost_total REAL NOT NULL DEFAULT 0, profit REAL NOT NULL DEFAULT 0, sale_date TEXT, completed_at TEXT, cancelled_at TEXT, created_at TEXT, updated_at TEXT)',
+            // sale_items NAO tem tenant_id: o escopo vem de sales. Espelhar o
+            // schema real, senao uma query errada passa no SQLite e quebra no MySQL.
+            'CREATE TABLE sale_items (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, product_id INTEGER NOT NULL, quantity REAL NOT NULL, cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0, subtotal REAL NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
         ];
 
         foreach ($statements as $statement) {
@@ -331,6 +338,70 @@ abstract class ApiIntegrationTestCase extends TestCase
         $pdo->exec("INSERT INTO imports (id, tenant_id, responsible_user_id, name, description, country, city, start_date, end_date, currency, exchange_rate, status, invested_amount, total_expenses, total_items, created_at, updated_at) VALUES (10, 2, 3, 'Importacao Tenant 2', 'Seed', 'US', 'Miami', '2026-08-01', '2026-08-05', 'USD', 5.40, 'PLANNED', 0, 0, 0, '$now', '$now')");
     }
 
+    /**
+     * Cria uma importacao CONCLUIDA com itens e custo real congelado no rateio.
+     *
+     * Fica fora do seed base de proposito: os testes de isolamento de tenant
+     * assumem que o tenant 1 comeca sem importacoes, entao cada teste que precisa
+     * de custo real chama este helper explicitamente.
+     *
+     * @param list<array<string, mixed>> $items
+     *
+     * @return int id da importacao
+     */
+    protected function seedCompletedImport(int $tenantId, array $items, string $status = 'COMPLETED'): int
+    {
+        $now = date('Y-m-d H:i:s');
+        $pdo = $this->pdo();
+
+        $statement = $pdo->prepare(
+            'INSERT INTO imports (id, tenant_id, responsible_user_id, name, country, city, start_date, end_date, currency, exchange_rate, status, allocation_method, invested_amount, total_expenses, total_items, completed_at, created_at, updated_at)
+             VALUES (NULL, :tenant_id, 1, :name, :country, :city, :start_date, :end_date, :currency, 1.0000, :status, :allocation_method, :invested, :expenses, :quantity, :completed_at, :created_at, :updated_at)'
+        );
+        $statement->execute([
+            'tenant_id' => $tenantId,
+            'name' => 'Importacao Concluida (fixture)',
+            'country' => 'US',
+            'city' => 'Miami',
+            'start_date' => '2026-08-01',
+            'end_date' => '2026-08-05',
+            'currency' => 'USD',
+            'status' => $status,
+            'allocation_method' => 'VALUE',
+            'invested' => 0,
+            'expenses' => 0,
+            'quantity' => 0,
+            'completed_at' => $status === 'COMPLETED' ? $now : null,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $importId = (int) $pdo->lastInsertId();
+
+        foreach ($items as $item) {
+            $insert = $pdo->prepare(
+                'INSERT INTO import_items (tenant_id, import_id, product_name, sku, quantity, unit_cost_foreign, exchange_rate, unit_cost_local, total_cost_local, allocated_expense, real_unit_cost, created_at, updated_at)
+                 VALUES (:tenant_id, :import_id, :product_name, :sku, :quantity, :unit_cost_foreign, 1.0000, :unit_cost_local, :total_cost_local, :allocated_expense, :real_unit_cost, :created_at, :updated_at)'
+            );
+            $insert->execute([
+                'tenant_id' => $tenantId,
+                'import_id' => $importId,
+                'product_name' => $item['product_name'] ?? 'Item',
+                'sku' => $item['sku'] ?? null,
+                'quantity' => $item['quantity'] ?? 1,
+                'unit_cost_foreign' => $item['unit_cost_local'] ?? 0,
+                'unit_cost_local' => $item['unit_cost_local'] ?? 0,
+                'total_cost_local' => $item['total_cost_local'] ?? ($item['unit_cost_local'] ?? 0),
+                'allocated_expense' => $item['allocated_expense'] ?? 0,
+                'real_unit_cost' => $item['real_unit_cost'] ?? ($item['unit_cost_local'] ?? 0),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+
+        return $importId;
+    }
+
     private function pdo(): PDO
     {
         return new PDO('sqlite:' . $this->databasePath);
@@ -359,5 +430,18 @@ abstract class ApiIntegrationTestCase extends TestCase
         $statement->execute($params);
 
         return $statement->rowCount();
+    }
+
+    /**
+     * Nomes das colunas de uma tabela do schema de teste. Usado para provar que
+     * o schema de teste espelha o schema real (ver ProductCatalogTest).
+     *
+     * @return list<string>
+     */
+    protected function fetchColumnList(string $table): array
+    {
+        $rows = $this->fetchAllRows('PRAGMA table_info(' . $table . ')');
+
+        return array_map(static fn (array $row): string => (string) $row['name'], $rows);
     }
 }

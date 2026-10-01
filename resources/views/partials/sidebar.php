@@ -4,6 +4,8 @@
  *   $currentUser      array|null  sessao do usuario
  *   $canManageUsers   bool        possui users.manage
  *   $activeNav        string      identificador da pagina atual
+ *
+ * Itens aparecem conforme as permissoes do usuario da sessao.
  */
 
 $e = static fn (mixed $value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
@@ -31,6 +33,9 @@ $has = static function (string $permission) use ($currentUser): bool {
 
     <div class="group">
         <div class="group-label">Administracao</div>
+        <?php if ($has('products.view')): ?>
+            <a class="item<?= $activeNav === 'products' ? ' active' : '' ?>" href="/produtos">Produtos</a>
+        <?php endif; ?>
         <?php if ($has('users.view')): ?>
             <a class="item<?= $activeNav === 'users' ? ' active' : '' ?>" href="/usuarios">Usuarios</a>
             <a class="item<?= $activeNav === 'roles' ? ' active' : '' ?>" href="/perfis">Perfis</a>
