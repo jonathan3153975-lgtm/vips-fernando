@@ -244,6 +244,10 @@ abstract class ApiIntegrationTestCase extends TestCase
             'CREATE TABLE stock_movements (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, product_id INTEGER NOT NULL, import_item_id INTEGER, sale_item_id INTEGER, user_id INTEGER, type TEXT NOT NULL, quantity REAL NOT NULL, balance_after REAL NOT NULL, reference_type TEXT NOT NULL, reference_id INTEGER, notes TEXT, created_at TEXT)',
             'CREATE TABLE categories (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL, description TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE brands (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, name TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
+            // Espelha o schema real de customers, incluindo o UNIQUE(tenant_id, document).
+            // Sem esta tabela o fixture divergiria do MySQL — customers existe la e e
+            // referenciada por sales.customer_id.
+            'CREATE TABLE customers (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, name TEXT NOT NULL, document TEXT, phone TEXT, whatsapp TEXT, email TEXT, address TEXT, notes TEXT, status TEXT NOT NULL DEFAULT \'ACTIVE\', created_at TEXT, updated_at TEXT, UNIQUE(tenant_id, document))',
             'CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, customer_id INTEGER, user_id INTEGER, sale_number TEXT, status TEXT NOT NULL, subtotal REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0, total REAL NOT NULL DEFAULT 0, cost_total REAL NOT NULL DEFAULT 0, profit REAL NOT NULL DEFAULT 0, sale_date TEXT, completed_at TEXT, cancelled_at TEXT, created_at TEXT, updated_at TEXT)',
             // sale_items NAO tem tenant_id: o escopo vem de sales. Espelhar o
             // schema real, senao uma query errada passa no SQLite e quebra no MySQL.
@@ -287,6 +291,10 @@ abstract class ApiIntegrationTestCase extends TestCase
             // Id 12 em vez de 9: o seed de teste nao espelha os ids do MySQL
             // (lá stock.adjust e 9). O que importa para o RBAC e o nome.
             12 => 'stock.adjust',
+            13 => 'customers.view',
+            14 => 'customers.create',
+            15 => 'customers.edit',
+            16 => 'customers.delete',
         ];
 
         foreach ($permissions as $id => $name) {
@@ -301,9 +309,10 @@ abstract class ApiIntegrationTestCase extends TestCase
         }
 
         // viewer (role 2) fica restrito a imports.view, para exercitar o 403.
-        // stock.adjust (12) vai para os admins e NAO para o viewer, para que a
-        // separacao entre ler saldo e mexer em saldo seja testavel.
-        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [1, 11], [1, 12], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10], [3, 11], [3, 12]];
+        // stock.adjust (12) e customers.edit/delete (15, 16) vao para os admins e
+        // NAO para o viewer, para que a separacao entre ler cadastro e mexer no
+        // cadastro seja testavel.
+        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [1, 11], [1, 12], [1, 13], [1, 14], [1, 15], [1, 16], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10], [3, 11], [3, 12], [3, 13], [3, 14], [3, 15], [3, 16]];
 
         foreach ($grants as [$roleId, $permissionId]) {
             $statement = $pdo->prepare('INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (:role_id, :permission_id, :created_at)');

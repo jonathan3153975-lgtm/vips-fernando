@@ -7,6 +7,7 @@ use App\Core\Session;
 use App\Controllers\Api\AuthApiController;
 use App\Controllers\Api\BrandApiController;
 use App\Controllers\Api\CategoryApiController;
+use App\Controllers\Api\CustomerApiController;
 use App\Controllers\Api\ExchangeRateApiController;
 use App\Controllers\Api\ImportApiController;
 use App\Controllers\Api\ProductApiController;
@@ -15,6 +16,7 @@ use App\Controllers\Api\StockApiController;
 use App\Controllers\Api\SupplierApiController;
 use App\Controllers\Api\UserApiController;
 use App\Controllers\AuthController;
+use App\Controllers\CustomerController;
 use App\Controllers\DashboardController;
 use App\Controllers\HealthController;
 use App\Controllers\HomeController;
@@ -30,6 +32,7 @@ use App\Middlewares\PermissionMiddleware;
 use App\Repositories\AuditLogRepository;
 use App\Repositories\BrandRepository;
 use App\Repositories\CategoryRepository;
+use App\Repositories\CustomerRepository;
 use App\Repositories\ExchangeRateRepository;
 use App\Repositories\ImportRepository;
 use App\Repositories\PasswordResetRepository;
@@ -43,6 +46,7 @@ use App\Repositories\UserRepository;
 use App\Services\AuthService;
 use App\Services\BrandService;
 use App\Services\CategoryService;
+use App\Services\CustomerService;
 use App\Services\ExchangeRateService;
 use App\Services\HealthService;
 use App\Services\ImportService;
@@ -86,6 +90,7 @@ $productService = new ProductService(
 );
 $roleRepository = new RoleRepository();
 $stockService = new StockService($stockRepository);
+$customerService = new CustomerService(new CustomerRepository(), $auditLogRepository);
 $tenantService = new TenantService(
     $tenantRepository,
     $auditLogRepository,
@@ -305,6 +310,55 @@ $router->get('/estoque', static fn (): array => $newStockController()->index(), 
 $router->get('/estoque/movimentacoes', static fn (): array => $newStockController()->movements(), [
 	$auth,
 	$permission('stock.view'),
+]);
+
+// Clientes (EPIC 07). Leitura em customers.view; o cadastro tambem aceita o
+// form nativo em POST /clientes com customers.create. Edicao e bloqueio ficam
+// so na API, como em produtos e estoque.
+$newCustomerController = static fn (): CustomerController => new CustomerController($customerService, $authService, $session);
+$newCustomerApiController = static fn (): CustomerApiController => new CustomerApiController($customerService);
+
+$router->get('/clientes', static fn (): array => $newCustomerController()->index(), [
+	$auth,
+	$permission('customers.view'),
+]);
+$router->post('/clientes', static fn (): array => $newCustomerController()->store(), [
+	$auth,
+	$permission('customers.create'),
+]);
+// O roteador compila `{id}` como `[^/]+` num regex ancorado, entao
+// `/clientes/123` casa aqui e `/clientes/123/historico` nao: nao ha risco de um
+// `{id}` "engolir" o segmento do historico, e nem precisa de regex inline.
+$router->get('/clientes/{id}', static fn (int $id): array => $newCustomerController()->show($id), [
+	$auth,
+	$permission('customers.view'),
+]);
+
+$router->get('/api/v1/customers', static fn (): array => $newCustomerApiController()->index(), [
+	$auth,
+	$permission('customers.view'),
+]);
+$router->post('/api/v1/customers', static fn (): array => $newCustomerApiController()->store(), [
+	$auth,
+	$permission('customers.create'),
+]);
+$router->get('/api/v1/customers/{id}', static fn (int $id): array => $newCustomerApiController()->show($id), [
+	$auth,
+	$permission('customers.view'),
+]);
+$router->put('/api/v1/customers/{id}', static fn (int $id): array => $newCustomerApiController()->update($id), [
+	$auth,
+	$permission('customers.edit'),
+]);
+$router->delete('/api/v1/customers/{id}', static fn (int $id): array => $newCustomerApiController()->destroy($id), [
+	$auth,
+	$permission('customers.delete'),
+]);
+// Historico comercial do cliente. Nao ha ambiguidade com o `{id}` acima: o
+// regex da rota `/api/v1/customers/{id}` e ancorado e o parametro e `[^/]+`.
+$router->get('/api/v1/customers/{id}/history', static fn (int $id): array => $newCustomerApiController()->history($id), [
+	$auth,
+	$permission('customers.view'),
 ]);
 
 $userService = new UserService($userRepository, $roleRepository, $auditLogRepository);

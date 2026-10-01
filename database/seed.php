@@ -38,6 +38,10 @@ $permissions = [
     'users.view',
     'users.manage',
     'settings.manage',
+    // A Etapa 6 separou escrita de leitura no cliente, como ja foi feito em
+    // products.* e stock.*: quem so consulta o cadastro nao edita nem bloqueia.
+    'customers.edit',
+    'customers.delete',
 ];
 
 $pdo->beginTransaction();
