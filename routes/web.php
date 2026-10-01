@@ -11,6 +11,7 @@ use App\Controllers\Api\ExchangeRateApiController;
 use App\Controllers\Api\ImportApiController;
 use App\Controllers\Api\ProductApiController;
 use App\Controllers\Api\RoleApiController;
+use App\Controllers\Api\StockApiController;
 use App\Controllers\Api\SupplierApiController;
 use App\Controllers\Api\UserApiController;
 use App\Controllers\AuthController;
@@ -19,6 +20,7 @@ use App\Controllers\HealthController;
 use App\Controllers\HomeController;
 use App\Controllers\ProductController;
 use App\Controllers\RoleController;
+use App\Controllers\StockController;
 use App\Controllers\TenantController;
 use App\Controllers\UserController;
 use App\Middlewares\AuthMiddleware;
@@ -34,6 +36,7 @@ use App\Repositories\PasswordResetRepository;
 use App\Repositories\PermissionRepository;
 use App\Repositories\ProductRepository;
 use App\Repositories\RoleRepository;
+use App\Repositories\StockRepository;
 use App\Repositories\SupplierRepository;
 use App\Repositories\TenantRepository;
 use App\Repositories\UserRepository;
@@ -47,6 +50,7 @@ use App\Services\PasswordResetService;
 use App\Services\PricingService;
 use App\Services\ProductService;
 use App\Services\RoleService;
+use App\Services\StockService;
 use App\Services\SupplierService;
 use App\Services\TenantService;
 use App\Services\UserService;
@@ -64,7 +68,8 @@ $exchangeRateRepository = new ExchangeRateRepository();
 $exchangeRateService = new ExchangeRateService($exchangeRateRepository, $auditLogRepository);
 $supplierRepository = new SupplierRepository();
 $supplierService = new SupplierService($supplierRepository, $auditLogRepository);
-$importService = new ImportService(new ImportRepository(), $auditLogRepository, $exchangeRateService, $supplierRepository);
+$stockRepository = new StockRepository();
+$importService = new ImportService(new ImportRepository(), $auditLogRepository, $exchangeRateService, $supplierRepository, $stockRepository);
 $productRepository = new ProductRepository();
 $categoryRepository = new CategoryRepository();
 $brandRepository = new BrandRepository();
@@ -80,6 +85,7 @@ $productService = new ProductService(
     $pricingService,
 );
 $roleRepository = new RoleRepository();
+$stockService = new StockService($stockRepository);
 $tenantService = new TenantService(
     $tenantRepository,
     $auditLogRepository,
@@ -243,6 +249,42 @@ $router->get('/api/v1/products/{id}/price-suggestion', static fn (int $id): arra
 	$permission('products.view'),
 ]);
 
+// Estoque. Leitura com stock.view; toda escrita com stock.adjust, porque mexem
+// em saldo. O id do produto vai na URL no lugar de adjustment/{id} para nao
+// confundir com o id da propria movimentacao.
+$router->get('/api/v1/stock', static fn (): array => (new StockApiController($stockService))->index(), [
+	$auth,
+	$permission('stock.view'),
+]);
+$router->get('/api/v1/stock/movements', static fn (): array => (new StockApiController($stockService))->movements(), [
+	$auth,
+	$permission('stock.view'),
+]);
+$router->post('/api/v1/stock/adjustments', static fn (): array => (new StockApiController($stockService))->adjust(), [
+	$auth,
+	$permission('stock.adjust'),
+]);
+$router->post('/api/v1/stock/reservations', static fn (): array => (new StockApiController($stockService))->reserve(), [
+	$auth,
+	$permission('stock.adjust'),
+]);
+$router->post('/api/v1/stock/reservations/release', static fn (): array => (new StockApiController($stockService))->release(), [
+	$auth,
+	$permission('stock.adjust'),
+]);
+$router->post('/api/v1/stock/consumptions', static fn (): array => (new StockApiController($stockService))->consume(), [
+	$auth,
+	$permission('stock.adjust'),
+]);
+$router->get('/api/v1/stock/{id}', static fn (int $id): array => (new StockApiController($stockService))->show($id), [
+	$auth,
+	$permission('stock.view'),
+]);
+$router->put('/api/v1/stock/{id}/minimum-quantity', static fn (int $id): array => (new StockApiController($stockService))->setMinimum($id), [
+	$auth,
+	$permission('stock.adjust'),
+]);
+
 $router->get('/produtos', static fn (): array => (new ProductController($productService, $categoryService, $brandService, $supplierService, $authService, $session))->index(), [
 	$auth,
 	$permission('products.view'),
@@ -250,6 +292,19 @@ $router->get('/produtos', static fn (): array => (new ProductController($product
 $router->post('/produtos', static fn (): array => (new ProductController($productService, $categoryService, $brandService, $supplierService, $authService, $session))->store(), [
 	$auth,
 	$permission('products.create'),
+]);
+
+// Telas de estoque: leitura com stock.view. As escritas continuam so na API,
+// por enquanto.
+$newStockController = static fn (): StockController => new StockController($stockService, $authService, $session);
+
+$router->get('/estoque', static fn (): array => $newStockController()->index(), [
+	$auth,
+	$permission('stock.view'),
+]);
+$router->get('/estoque/movimentacoes', static fn (): array => $newStockController()->movements(), [
+	$auth,
+	$permission('stock.view'),
 ]);
 
 $userService = new UserService($userRepository, $roleRepository, $auditLogRepository);

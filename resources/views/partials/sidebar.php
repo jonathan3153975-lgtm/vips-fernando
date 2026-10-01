@@ -32,10 +32,21 @@ $has = static function (string $permission) use ($currentUser): bool {
     </div>
 
     <div class="group">
-        <div class="group-label">Administracao</div>
+        <div class="group-label">Operacao</div>
+        <?php if ($has('dashboard.view')): ?>
+            <a class="item<?= $activeNav === 'dashboard' ? ' active' : '' ?>" href="/dashboard">Dashboard</a>
+        <?php endif; ?>
         <?php if ($has('products.view')): ?>
             <a class="item<?= $activeNav === 'products' ? ' active' : '' ?>" href="/produtos">Produtos</a>
         <?php endif; ?>
+        <?php if ($has('stock.view')): ?>
+            <a class="item<?= $activeNav === 'stock' ? ' active' : '' ?>" href="/estoque">Estoque</a>
+            <a class="item<?= $activeNav === 'stock-movements' ? ' active' : '' ?>" href="/estoque/movimentacoes">Movimentações</a>
+        <?php endif; ?>
+    </div>
+
+    <div class="group">
+        <div class="group-label">Administracao</div>
         <?php if ($has('users.view')): ?>
             <a class="item<?= $activeNav === 'users' ? ' active' : '' ?>" href="/usuarios">Usuarios</a>
             <a class="item<?= $activeNav === 'roles' ? ' active' : '' ?>" href="/perfis">Perfis</a>

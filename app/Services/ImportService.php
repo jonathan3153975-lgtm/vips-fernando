@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Repositories\AuditLogRepository;
 use App\Repositories\ImportRepository;
+use App\Repositories\StockRepository;
 use App\Repositories\SupplierRepository;
 use RuntimeException;
 
@@ -34,6 +35,7 @@ final class ImportService
         private readonly AuditLogRepository $auditLogs,
         private readonly ExchangeRateService $exchangeRates,
         private readonly SupplierRepository $suppliers,
+        private readonly ?StockRepository $stock = null,
     ) {
     }
 
@@ -183,7 +185,16 @@ final class ImportService
         $method = $allocationMethod ?? (string) ($import['allocation_method'] ?? ImportRepository::ALLOCATION_VALUE);
         $this->assertAllocationMethod($method);
 
-        $completed = $this->imports->freeze($importId, $method);
+        // Fechamento e entrada em estoque na mesma transacao. Sem isso, uma
+        // falha ao dar entrada deixaria a importacao concluida sem a mercadoria
+        // no estoque — o usuario veria compra paga e saldo zerado.
+        $completed = $this->imports->transactional(function () use ($importId, $method): array {
+            $frozen = $this->imports->freeze($importId, $method);
+
+            $this->stock?->receiveImportItems($importId);
+
+            return $frozen;
+        });
 
         $this->auditLogs->create('imports.complete', 'import', $importId, [
             'allocation_method' => $method,

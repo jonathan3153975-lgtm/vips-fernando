@@ -382,89 +382,124 @@ final class ImportRepository extends TenantScopedRepository
 
         $this->findOrFail($importId);
 
-        $pdo = $this->pdo();
-        $pdo->beginTransaction();
+        // Entra numa transacao externa quando ja existir uma (o fechamento da
+        // importacao compartilha transacao com a entrada de estoque). Abrir uma
+        // segunda aqui faria o MySQL recusar por "active transaction".
+        return $this->transactional(fn (): array => $this->freezeWithin($importId, $allocationMethod));
+    }
 
-        try {
-            $items = $this->selectAll(
-                'SELECT id, quantity, total_cost_local
-                 FROM import_items
-                 WHERE tenant_id = :tenant_id AND import_id = :import_id
-                 ORDER BY id',
-                ['import_id' => $importId],
-            );
+    /**
+     * Corpo transacional do fechamento, executado dentro da transacao de quem
+     * chamou (esta ou uma externa).
+     *
+     * @return array<string, mixed>
+     */
+    private function freezeWithin(int $importId, string $allocationMethod): array
+    {
+        $items = $this->selectAll(
+            'SELECT id, quantity, total_cost_local
+             FROM import_items
+             WHERE tenant_id = :tenant_id AND import_id = :import_id
+             ORDER BY id',
+            ['import_id' => $importId],
+        );
 
-            if ($items === []) {
-                throw new RuntimeException('Adicione ao menos um item antes de concluir a importacao.');
-            }
+        if ($items === []) {
+            throw new RuntimeException('Adicione ao menos um item antes de concluir a importacao.');
+        }
 
-            $expenseTotal = (float) $this->selectValue(
-                'SELECT COALESCE(SUM(converted_amount), 0)
-                 FROM import_expenses
-                 WHERE tenant_id = :tenant_id AND import_id = :import_id',
-                ['import_id' => $importId],
-            );
+        $expenseTotal = (float) $this->selectValue(
+            'SELECT COALESCE(SUM(converted_amount), 0)
+             FROM import_expenses
+             WHERE tenant_id = :tenant_id AND import_id = :import_id',
+            ['import_id' => $importId],
+        );
 
-            $allocationCents = $this->allocateCents($items, $expenseTotal, $allocationMethod);
+        $allocationCents = $this->allocateCents($items, $expenseTotal, $allocationMethod);
 
-            $totalCostLocal = 0.0;
-            $totalQuantity = 0.0;
+        $totalCostLocal = 0.0;
+        $totalQuantity = 0.0;
 
-            foreach ($items as $index => $item) {
-                $allocated = $allocationCents[$index] / 100;
-                $quantity = (float) $item['quantity'];
-                $realUnitCost = $quantity > 0
-                    ? round(((float) $item['total_cost_local'] + $allocated) / $quantity, 2)
-                    : 0.00;
-
-                $this->run(
-                    'UPDATE import_items
-                     SET allocated_expense = :allocated_expense,
-                         real_unit_cost = :real_unit_cost,
-                         updated_at = :updated_at
-                     WHERE tenant_id = :tenant_id AND id = :id',
-                    [
-                        'allocated_expense' => $allocated,
-                        'real_unit_cost' => $realUnitCost,
-                        'updated_at' => date('Y-m-d H:i:s'),
-                        'id' => $item['id'],
-                    ],
-                );
-
-                $totalCostLocal += (float) $item['total_cost_local'];
-                $totalQuantity += $quantity;
-            }
+        foreach ($items as $index => $item) {
+            $allocated = $allocationCents[$index] / 100;
+            $quantity = (float) $item['quantity'];
+            $realUnitCost = $quantity > 0
+                ? round(((float) $item['total_cost_local'] + $allocated) / $quantity, 2)
+                : 0.00;
 
             $this->run(
-                'UPDATE imports
-                 SET status = :status,
-                     allocation_method = :allocation_method,
-                     invested_amount = :invested_amount,
-                     total_expenses = :total_expenses,
-                     total_items = :total_items,
-                     completed_at = :completed_at,
+                'UPDATE import_items
+                 SET allocated_expense = :allocated_expense,
+                     real_unit_cost = :real_unit_cost,
                      updated_at = :updated_at
                  WHERE tenant_id = :tenant_id AND id = :id',
                 [
-                    'status' => self::STATUS_COMPLETED,
-                    'allocation_method' => $allocationMethod,
-                    'invested_amount' => round($totalCostLocal + $expenseTotal, 2),
-                    'total_expenses' => round($expenseTotal, 2),
-                    'total_items' => $totalQuantity,
-                    'completed_at' => date('Y-m-d H:i:s'),
+                    'allocated_expense' => $allocated,
+                    'real_unit_cost' => $realUnitCost,
                     'updated_at' => date('Y-m-d H:i:s'),
-                    'id' => $importId,
+                    'id' => $item['id'],
                 ],
             );
 
-            $pdo->commit();
+            $totalCostLocal += (float) $item['total_cost_local'];
+            $totalQuantity += $quantity;
+        }
+
+        $this->run(
+            'UPDATE imports
+             SET status = :status,
+                 allocation_method = :allocation_method,
+                 invested_amount = :invested_amount,
+                 total_expenses = :total_expenses,
+                 total_items = :total_items,
+                 completed_at = :completed_at,
+                 updated_at = :updated_at
+             WHERE tenant_id = :tenant_id AND id = :id',
+            [
+                'status' => self::STATUS_COMPLETED,
+                'allocation_method' => $allocationMethod,
+                'invested_amount' => round($totalCostLocal + $expenseTotal, 2),
+                'total_expenses' => round($expenseTotal, 2),
+                'total_items' => $totalQuantity,
+                'completed_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+                'id' => $importId,
+            ],
+        );
+
+        return $this->find($importId) ?? [];
+    }
+
+    /**
+     * Executa o callback numa transacao. Se ja existir uma transacao externa,
+     * apenas participa dela: e o que permite concluir a importacao e dar entrada
+     * no estoque como uma operacao so — se a entrada falhar, a importacao nao
+     * fica concluida.
+     */
+    public function transactional(callable $callback): mixed
+    {
+        $pdo = $this->pdo();
+        $owns = !$pdo->inTransaction();
+
+        if ($owns) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $result = $callback();
+
+            if ($owns) {
+                $pdo->commit();
+            }
+
+            return $result;
         } catch (Throwable $throwable) {
-            $pdo->rollBack();
+            if ($owns) {
+                $pdo->rollBack();
+            }
 
             throw $throwable;
         }
-
-        return $this->find($importId) ?? [];
     }
 
     /**

@@ -5,7 +5,7 @@ plano de tarefas) e o `manual/` (que é a especificação). Aqui fica o que
 **aconteceu de fato**, na ordem, com as decisões tomadas e o estado real do
 código.
 
-- **Última atualização:** 2026-09-28
+- **Última atualização:** 2026-10-01
 - **Fonte do plano:** `roteiro.md`
 - **Documento pedido pela Etapa 0** como `manual/71 — Diário de Bordo.md`; está
   aqui na raiz com o nome `diario_de_bordo.md`.
@@ -184,33 +184,107 @@ placeholder repetido. Quando um `HY093` aparece, ele é da família, não da lin
 
 ---
 
-## Estado atual do repositório (2026-09-28)
+### Etapa 5 — Estoque transacional e rastreabilidade (EPIC 06)
+**SEM COMMIT** (working tree, 2026-10-01)
+
+- **A cadeia fecha:** concluir uma importação dá entrada no estoque de cada produto
+  vinculado, gravando `IMPORT_ENTRY`. O vínculo é `products.default_import_item_id`,
+  escolhido na tela de produto da Etapa 4. Fechamento e entrada de estoque rodam na
+  **mesma transação** — `ImportRepository::freeze()` virou `freezeWithin()` para poder
+  participar da transação aberta por fora.
+- **Idempotência por item:** se já existe `IMPORT_ENTRY` para o `import_item_id`, a
+  entrada é pulada. Sem isso, reabrir e concluir de novo somaria a mercadoria duas
+  vezes.
+- **Regra de saldo negativo: proibido, sem alçada.** O serviço dá a mensagem de erro;
+  três `CHECK` no banco garantem mesmo assim (`quantity >= 0`,
+  `reserved_quantity >= 0`, `reserved_quantity <= quantity`). A regra é dupla de
+  propósito: a constraint cobre o que um INSERT ou script direto faria.
+- **Reserva não mexe no saldo físico**, só em `reserved_quantity`; liberação é a
+  operação oposta. Consumo debita **saldo e reserva na mesma movimentação** — não dá
+  para fazer em dois passos: com saldo 10 e reserva 10, baixar 5 primeiro deixaria
+  `reserved(10) > quantity(5)` e a constraint derrubaria a operação no meio.
+- Ajuste manual exige `stock.adjust` **e justificativa obrigatória**. Resumo de
+  rastreabilidade por `import_item_id` no lugar de lote (ver decisão abaixo).
+- Telas `/estoque` (saldo, disponível, reservado, alerta de reposição) e
+  `/estoque/movimentacoes` (histórico com filtros). Ajuste, reserva, liberação e
+  consumo são pela API, sem tela própria — decisão consciente de escopo.
+- Estado verde: 246 testes / 1045 asserções; `composer lint` em 113 arquivos;
+  probe MySQL 16/16; smoke HTTP 29/29.
+
+#### Decisão de escopo: rastreio por lote foi adiado
+
+`product_lots` e `stock_movements.lot_id` **não** existem. A rastreabilidade existe por
+`import_item_id`: toda entrada sabe de qual compra veio. Lote com custo congelado ficou
+como P0 de etapa própria, registrado no `roteiro.md`. Sem essa decisão, o lote puxaria
+a Etapa 5 para dentro da de vendas (qual lote oPedido consome).
+
+#### O bug multi-tenant que o smoke HTTP pegou e os testes não
+
+O `ensureRow()` filtrava `stock` por `tenant_id`, mas **não conferia de quem era o
+produto**. Um `product_id` de outra empresa não encontrava linha, entrava no `INSERT` e
+criava `stock` no tenant de quem perguntou, apontando para o produto alheio — devolvendo
+200 com saldo 0 e, pior, fazendo o nome e o SKU do outro aparecerem na lista de quem
+perguntou. O filtro por tenant na tabela não segura: a linha criada *é* do tenant que
+perguntou.
+
+Corrigido com `assertProductInTenant()`, que devolve **404** (para quem perguntou o
+produto não existe; dizer "é de outra empresa" já entregaria informação indevida).
+
+O teste que deveria cobrir isso — `testAdjustingProductOfAnotherTenantFails` — **passava
+por motivo errado**: chamava `bootApplication()` sem login, então não havia tenant
+ativo e o repositório lançava `MissingTenantException` antes de olhar o produto. Troquei
+por login real e acrescentei as duas rotas que faltavam (`balance()` e
+`setMinimumQuantity()`, as duas que passavam por `ensureRow()`), verificando também que
+nenhuma linha de estoque é criada.
+
+**Lição registrada:** um teste de isolamento que não autentica não testa isolamento —
+falha por falta de contexto, não por defeito. Autentique antes de afirmar que o
+tenant está errado.
+
+#### Paginação que existia só na meta
+
+`balances()` não tinha `LIMIT`, mas a API e a tela anunciavam `page`/`per_page`. O
+`meta` dizia uma coisa e `data` trazia a lista inteira. O `LIMIT` foi para dentro do
+repositório, e `countBalances()` passou a usar o mesmo filtro de `balances()` — duplicar
+as condições nos dois é o jeito clássico de `total` e `data` começarem a discordar.
+Verifiquei que o teste novo falha quando o `LIMIT` é removido, para não ser outro
+teste decorativo.
+
+---
+
+## Estado atual do repositório (2026-10-01)
 
 | Métrica | Valor |
 |---|---|
-| Suíte de testes | 197 testes / 799 asserções, verde |
-| `composer lint` | 107 arquivos, sem erro de sintaxe |
-| Migrations | 15 (`000001` a `000015`) — a Etapa 4 não exigiu nenhuma |
-| Tabelas | 30 |
-| Rotas | 69 (48 de API) |
-| Permissões semeadas | 22 — a Etapa 4 reusou `products.*`, nenhuma nova |
-| Arquivos PHP em `app/` | 63 |
-| Arquivos de teste | 15 |
-| Último commit | `5e38611 etapa 3` |
+| Suíte de testes | 246 testes / 1045 asserções, verde |
+| `composer lint` | 113 arquivos, sem erro de sintaxe |
+| Probe MySQL real | 16/16, banco restaurado ao seed |
+| Smoke HTTP | 29/29, banco restaurado ao seed |
+| Migrations | 16 (`000001` a `000016`) — a Etapa 5 exigiu a `000016` |
+| Tabelas | 30 (nenhuma nova; a Etapa 5 não criou `product_lots`) |
+| Rotas | 79 (56 de API) |
+| Permissões semeadas | 22 — a Etapa 5 reusou `stock.view`/`stock.adjust`, nenhuma nova |
+| Arquivos PHP em `app/` | 67 |
+| Arquivos de teste | 14 |
+| Último commit | `42e3db2 etapa 3` (contém a Etapa 4) |
 | Banco MySQL local | no estado do seed (1 tenant, 5 perfis, 1 usuário, 22 permissões) |
 
 Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
 `tenants`), `000014` (`users.auth_version`), `000015`
-(`imports.allocation_method` e `completed_at`).
+(`imports.allocation_method` e `completed_at`), `000016` (três `CHECK` de invariante
+em `stock` e dois índices de histórico em `stock_movements`).
 
 ## Onde parou
 
-- **Etapa 4 implementada e validada, mas ainda NÃO commitada.** O working tree tem
-  6 arquivos modificados e 9 novos (`git status`). É o ponto exato de retomada.
-- A Etapa 3 está commitada em `5e38611` (17 arquivos, incluindo o diário).
-- Próxima etapa do roteiro: **Etapa 5 — Estoque transacional e rastreabilidade
-  (EPIC 06)**, marcada como `MVP ★` — sem ela o MVP não entrega valor.
-- Antes de seguir, decisão pendente do usuário: commitar a Etapa 4.
+- **Etapas 4 e 5 implementadas e validadas, ambas ainda NÃO commitadas.** A Etapa 5 é
+  o ponto exato de retomada: código, migration `000016` aplicada, docs atualizadas.
+- A Etapa 3 está commitada em `5e38611`; a Etapa 4 em `42e3db2` (mensagem `etapa 3`).
+- **Bug multi-tenant corrigido nesta etapa:** `StockRepository::ensureRow()` criava
+  linha de estoque para produto de outra empresa. O smoke HTTP contra o MariaDB real
+  foi o que pegou — os testes passavam por motivo errado.
+- Rastreio por lote (`product_lots`) adiado para etapa própria, por decisão de escopo;
+  rastreabilidade atual é por `import_item_id`.
+- Próxima etapa do roteiro: **Etapa 6 — Clientes e CRM (EPIC 07)**.
 
 ## Decisões técnicas consolidadas
 
@@ -229,6 +303,15 @@ Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
   `preço = custo × (1 + margem/100)` e `margem = (preço − custo)/custo × 100`.
   Os manuais aceitam as duas leituras; esta é a coerente com os exemplos de
   "preço sugerido" e com a coluna `product_prices.margin`.
+- **Rastreabilidade de estoque é por `import_item_id`, não por lote** (decisão de
+  escopo na Etapa 5): toda entrada em estoque sabe de qual compra veio, sem
+  `product_lots`. Lote com custo congelado ficou para etapa própria.
+- **Saldo negativo é proibido, sem alçada**: erro no serviço e `CHECK` no banco.
+- **Consumo de reserva debita saldo e reserva na mesma movimentação**; fazer em dois
+  passos viola `reserved <= quantity` no meio da transação.
+- Qualquer caminho que receba `product_id` de fora passa por
+  `StockRepository::assertProductInTenant()`, que devolve 404: o filtro por
+  `tenant_id` na tabela não protege o produto, só a linha.
 - **Tabelas de apoio reusam as permissões do domínio que as alimenta.** Categoria e
   marca usam `products.view/create/edit`: quem não vê produtos não vê o catálogo.
 - **`default_import_item_id` é informado, não derivado.** Escolher o item por SKU
@@ -266,11 +349,27 @@ Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
   - Checagem de unicidade de SKU e de status fora da transação de gravação — duas
     requisições simultâneas com o mesmo SKU podem passar pela checagem e uma falhar
     no índice único (a mensagem de erro resultante é a do driver, não a de domínio).
+- **Etapa 5**
+  - **Rastreio por lote não implementado** (`product_lots`, `lot_id`). Adiado por
+    decisão de escopo: a rastreabilidade atual é `stock_movements.import_item_id`.
+    Lote com custo congelado é P0 de etapa própria.
+  - **Ajuste, reserva, liberação e consumo só existem como API.** As telas de estoque
+    são de leitura; não há formulário de ajuste nem tela de reserva.
+  - **Reserva não se prende a venda.** `reserved_quantity` é um número no produto,
+    sem vínculo com pedido; `sale_item_id` existe na movimentação mas o consumo pelo
+    checkout (Etapa 7) ainda não foi feito.
+  - Inventário periódico e transferência entre unidades (`P2`) não iniciados.
+  - Saldo negativo é proibido por serviço e por `CHECK`. Uma futura alçada para
+    permitir saldo negativo exigiria remover a constraint — não foi prevista.
+  - Checagem de disponibilidade na reserva é leitura sem `SELECT ... FOR UPDATE`: duas
+    reservas simultâneas podem passar pela checagem, e a segunda é barrada pela
+    constraint do banco (erro do driver, não mensagem de domínio).
 - **Transversal**
   - PHPStan/PHPCS pendentes de instalação.
   - **Fixture de teste pode divergir do schema real** e esconder bugs. Ao adicionar
     coluna, conferir `ApiIntegrationTestCase` contra a migration. Foi exatamente isso
     que escondeu o erro de `si.tenant_id` na Etapa 4.
+  - **Teste de isolamento que não autentica não testa isolamento** — ver Etapa 5.
 
 ## Bloqueios
 
@@ -283,17 +382,16 @@ Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
 
 ## Próximo passo
 
-1. Commitar a Etapa 4 (ou revisar antes).
-2. Seguir para a **Etapa 5 — Estoque transacional e rastreabilidade (EPIC 06)**,
-   marcada `MVP ★`: fecha a cadeia custo real → produto → estoque.
+1. Commitar as Etapas 4 e 5 (ou revisar antes).
+2. Seguir para a **Etapa 6 — Clientes e CRM (EPIC 07)**.
 3. Dívida que convém atacar cedo: rateio por peso/combinação (definir o campo de
-   peso) e rate limit de login.
+   peso), rate limit de login e a tela de ajuste de estoque.
 
 ## Como validar
 
 ```powershell
 composer lint                          # sintaxe
-composer test                          # 197 testes / 799 asserções
+composer test                          # 246 testes / 1045 asserções
 composer migrate                       # aplica migrations pendentes
 composer seed                          # idempotente
 php -S localhost:8000 -t public public/index.php   # smoke manual
@@ -301,6 +399,9 @@ php -S localhost:8000 -t public public/index.php   # smoke manual
 
 - Probe de banco e smoke HTTP foram executados com scripts temporários fora do
   repositório; o banco local é conferido e restaurado ao seed ao final.
+- **O smoke HTTP paga mais que os testes aqui.** Na Etapa 5 ele achou um bug
+  multi-tenant que 46 testes não pegaram, porque o isolamento estava coberto por um
+  teste que falhava por outro motivo.
 
 ## Convenções de verificação usadas nesta base
 

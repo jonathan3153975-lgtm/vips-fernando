@@ -284,6 +284,9 @@ abstract class ApiIntegrationTestCase extends TestCase
             9 => 'users.view',
             10 => 'users.manage',
             11 => 'settings.manage',
+            // Id 12 em vez de 9: o seed de teste nao espelha os ids do MySQL
+            // (lá stock.adjust e 9). O que importa para o RBAC e o nome.
+            12 => 'stock.adjust',
         ];
 
         foreach ($permissions as $id => $name) {
@@ -298,7 +301,9 @@ abstract class ApiIntegrationTestCase extends TestCase
         }
 
         // viewer (role 2) fica restrito a imports.view, para exercitar o 403.
-        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [1, 11], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10], [3, 11]];
+        // stock.adjust (12) vai para os admins e NAO para o viewer, para que a
+        // separacao entre ler saldo e mexer em saldo seja testavel.
+        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [1, 11], [1, 12], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10], [3, 11], [3, 12]];
 
         foreach ($grants as [$roleId, $permissionId]) {
             $statement = $pdo->prepare('INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (:role_id, :permission_id, :created_at)');

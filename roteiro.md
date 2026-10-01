@@ -371,19 +371,26 @@ Observação residual: `IF NOT EXISTS` torna a reexecução segura, mas não det
 
 > Hoje existe apenas `GET /api/v1/products/{id}/stock` (leitura de saldo). `stock_movements` foi criada e nunca usada.
 
-- [ ] `P0` `StockService::receiveFromImport()`: ao concluir uma importação, gerar **lotes** e dar entrada no estoque de cada produto vinculado, gravando `stock_movements` do tipo `IMPORT_ENTRY`.
-- [ ] `P0` Criar tabela de **lotes** (`product_lots`) com `import_id`, custo unitário congelado, data de entrada e quantidade.
-- [ ] `P1` `StockService::adjust()` para ajuste manual controlado, exigindo permissão `stock.adjust` e justificativa obrigatória, gravando movimentação.
-- [ ] `P1` Consulta de saldo por produto **e por lote** (`GET /api/v1/stock?product_id=&lot_id=`).
-- [ ] `P1` Histórico de movimentações (`GET /api/v1/stock/{id}/movements`) com filtros por tipo, período e usuário.
-- [ ] `P1` Bloquear saldo negativo; definir a regra explícita (permitir com alçada ou proibir) e documentá-la.
-- [ ] `P1` `reserved_quantity`: reserva de estoque para venda e liberação em caso de cancelamento.
-- [ ] `P1` Alerta de estoque abaixo do mínimo (`minimum_quantity`).
-- [ ] `P1` Tela de estoque com saldo por produto/lote e formulário de ajuste.
+### Decisão de escopo: rastreio por lote foi adiado
+
+`product_lots` e `stock_movements.lot_id` **não** foram implementados nesta etapa. A rastreabilidade
+existe, mas por outro caminho: cada `IMPORT_ENTRY` guarda o `import_item_id`, então toda entrada no
+estoque sabe de qual compra veio, e `products.default_import_item_id` é o vínculo escolhido na tela de
+produto. Lote com custo congelado é P0 de uma etapa própria (itens 2 e 3 abaixo).
+
+- [x] `P0` `StockService::receiveFromImport()`: ao concluir uma importação, dar entrada no estoque de cada produto vinculado, gravando `stock_movements` do tipo `IMPORT_ENTRY`.
+- [ ] `P0` Criar tabela de **lotes** (`product_lots`) com `import_id`, custo unitário congelado, data de entrada e quantidade. — *adiado; rastreio atual é por `import_item_id`*
+- [x] `P1` `StockService::adjust()` para ajuste manual controlado, exigindo permissão `stock.adjust` e justificativa obrigatória, gravando movimentação.
+- [x] `P1` Consulta de saldo por produto (`GET /api/v1/stock?product_id=`). Por lote ficou para a etapa de lotes.
+- [x] `P1` Histórico de movimentações (`GET /api/v1/stock/movements`) com filtros por tipo, período e usuário.
+- [x] `P1` Bloquear saldo negativo. **Regra: proibido, sem alçada.** Saldo físico, saldo reservado e `reserved <= quantity` são garantidos no serviço (mensagem de erro) e por `CHECK` no banco.
+- [x] `P1` `reserved_quantity`: reserva de estoque para venda e liberação em caso de cancelamento. Exposto por API; sem tela própria.
+- [x] `P1` Alerta de estoque abaixo do mínimo (`minimum_quantity`).
+- [x] `P1` Tela de estoque com saldo por produto e alerta de reposição (`/estoque`) e histórico (`/estoque/movimentacoes`). Ajuste, reserva e consumo são pela API.
 - [ ] `P2` Inventário periódico com contagem e divergência.
 - [ ] `P2` Transferência entre unidades de negócio do mesmo tenant.
 
-**Critério de conclusão:** concluir uma importação com produto vinculado gera lote, entrada em estoque e movimentação auditável; ajuste manual sem permissão é bloqueado; saldo nunca fica negativo.
+**Critério de conclusão:** concluir uma importação com produto vinculado gera entrada em estoque e movimentação auditável; ajuste manual sem permissão é bloqueado; saldo nunca fica negativo.
 
 ---
 
