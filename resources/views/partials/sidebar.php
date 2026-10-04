@@ -29,13 +29,6 @@ $has = static function (string $permission) use ($currentUser): bool {
         <?php if ($has('dashboard.view')): ?>
             <a class="item<?= $activeNav === 'dashboard' ? ' active' : '' ?>" href="/dashboard">Dashboard</a>
         <?php endif; ?>
-    </div>
-
-    <div class="group">
-        <div class="group-label">Operacao</div>
-        <?php if ($has('dashboard.view')): ?>
-            <a class="item<?= $activeNav === 'dashboard' ? ' active' : '' ?>" href="/dashboard">Dashboard</a>
-        <?php endif; ?>
         <?php if ($has('products.view')): ?>
             <a class="item<?= $activeNav === 'products' ? ' active' : '' ?>" href="/produtos">Produtos</a>
         <?php endif; ?>

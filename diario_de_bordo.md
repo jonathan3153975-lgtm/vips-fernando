@@ -5,7 +5,7 @@ plano de tarefas) e o `manual/` (que é a especificação). Aqui fica o que
 **aconteceu de fato**, na ordem, com as decisões tomadas e o estado real do
 código.
 
-- **Última atualização:** 2026-10-01
+- **Última atualização:** 2026-10-02
 - **Fonte do plano:** `roteiro.md`
 - **Documento pedido pela Etapa 0** como `manual/71 — Diário de Bordo.md`; está
   aqui na raiz com o nome `diario_de_bordo.md`.
@@ -116,7 +116,7 @@ Executada fora da ordem do roteiro: **2.4 → 2.1 → 2.3 → 2.2**.
 - Estado verde: 121 testes / 458 asserções.
 
 ### Etapa 3 — Núcleo de custo (EPIC 04)
-**SEM COMMIT** (working tree, 2026-09-27)
+**Commit:** `5e38611` (2026-09-27)
 
 - **P0 transação:** `ImportRepository::freeze()` faz o cálculo inteiro (ler itens,
   somar despesas, gravar rateio e totais) em uma única transação.
@@ -141,7 +141,7 @@ Executada fora da ordem do roteiro: **2.4 → 2.1 → 2.3 → 2.2**.
 ---
 
 ### Etapa 4 — Catálogo, produtos e preços (EPIC 05)
-**SEM COMMIT** (working tree, 2026-09-28)
+**Commit:** `42e3db2` (2026-09-28) — *a mensagem diz "etapa 3"; a Etapa 3 já tinha saído em `5e38611`*
 
 - **Categorias e marcas** ganharam repository/service/API. A categoria valida o pai
   e bloqueia ciclo (não pode ser pai de si mesma nem ser movida para baixo de si
@@ -151,7 +151,7 @@ Executada fora da ordem do roteiro: **2.4 → 2.1 → 2.3 → 2.2**.
   de salvar: custo explícito tem precedência, senão entra o custo real do item
   concluído; com `margin` calcula `sale_price`/`minimum_price`; com `sale_price`
   explícito recalcula a margem para o preço salvo (`PricingService::forSalePrice()`).
-- **Trocar o item de importaçãovinculado recalcula o custo** — antes o
+- **Trocar o item de importação vinculado recalcula o custo** — antes o
   `product_prices` continuava descrevendo o item antigo.
 - Cadastro de produto + preço + estoque em **uma transação**.
 - `default_import_item_id` passou a ser de fato gravado (antes era aceito e
@@ -185,7 +185,7 @@ placeholder repetido. Quando um `HY093` aparece, ele é da família, não da lin
 ---
 
 ### Etapa 5 — Estoque transacional e rastreabilidade (EPIC 06)
-**SEM COMMIT** (working tree, 2026-10-01)
+**Commit:** `08b25df` (2026-10-01) — *mensagem "etapa 4 e 5"*
 
 - **A cadeia fecha:** concluir uma importação dá entrada no estoque de cada produto
   vinculado, gravando `IMPORT_ENTRY`. O vínculo é `products.default_import_item_id`,
@@ -216,7 +216,7 @@ placeholder repetido. Quando um `HY093` aparece, ele é da família, não da lin
 `product_lots` e `stock_movements.lot_id` **não** existem. A rastreabilidade existe por
 `import_item_id`: toda entrada sabe de qual compra veio. Lote com custo congelado ficou
 como P0 de etapa própria, registrado no `roteiro.md`. Sem essa decisão, o lote puxaria
-a Etapa 5 para dentro da de vendas (qual lote oPedido consome).
+a Etapa 5 para dentro da de vendas (qual lote o pedido consome).
 
 #### O bug multi-tenant que o smoke HTTP pegou e os testes não
 
@@ -252,39 +252,151 @@ teste decorativo.
 
 ---
 
-## Estado atual do repositório (2026-10-01)
+### Etapa 6 — Clientes e CRM (EPIC 07)
+**Commit:** `7f507ce` (2026-10-01) — *mensagem "etapa nem sei"*
+**Estado:** `[~]` implementado e coberto por testes; **falta a validação no MySQL real** (ver "Dívida desta entrada")
+
+- **Nenhuma migration e nenhuma tabela nova.** A etapa só **leu** `sales`, que já
+  existia desde a baseline. Nenhuma escrita em venda foi feita aqui — isso é Etapa 7.
+- `CustomerRepository` + `CustomerService` + API + telas. Busca por nome, documento ou
+  contato; filtros de situação e de "já comprou"; paginação com `total` vindo do mesmo
+  filtro da `data` (mesma lição da Etapa 5 sobre `countBalances()`).
+- **Documento gravado em dígitos.** "123.456.789-01" e "12345678901" são o mesmo CPF.
+  Guardar as duas formas faria o `UNIQUE (tenant_id, document)` **não** pegar a
+  duplicata — as strings diferem — enquanto a busca por documento mostraria duas
+  linhas para a mesma pessoa. Vazio vira `NULL`, não `""`, porque `NULL` é distinto no
+  índice único e duas strings vazias colidiriam. O índice do banco passa a ser a fonte
+  da verdade.
+- **`DELETE` é desfecho, não erro.** Cliente com venda concluída é **desativado**; sem
+  histórico, é **apagado**. A API responde 200 nos dois casos e distingue no corpo
+  (`blocked`, `purchases`) em vez de lançar exceção. Um DELETE tem dois resultados
+  legítimos e legíveis; lançar obrigaria o controller a adivinhar de onde veio o erro.
+  `sales.customer_id` é `ON DELETE SET NULL`, então a remoção física apagaria o vínculo
+  em silêncio se a pré-condição falhasse — por isso a garantia é no serviço.
+- **Só venda `COMPLETED` conta.** Vale para o resumo e para a decisão de apagar: uma
+  venda `CANCELLED` não é histórico, e o cliente volta a ser apagável.
+- Resumo comercial: `purchase_count`, `total_spent`, `total_profit`, `average_ticket`,
+  `last_purchase_at`. O `AVG` usa `NULLIF(total, 0)` para não inflar nem afundar o
+  ticket médio com venda de brinde. A listagem agrega o mesmo resumo por `LEFT JOIN`,
+  com o filtro de tenant e de `COMPLETED` **repetido** de propósito — é o que impede a
+  lista e o detalhe de contarem coisas diferentes.
+- Todas as escritas gravam auditoria (`customer.create`, `.update`, `.block`, `.delete`):
+  cadastro de cliente é dado pessoal.
+- Telas `/clientes` (lista com filtros + formulário nativo de cadastro) e `/clientes/{id}`
+  (ficha, resumo e histórico). Edição e bloqueio só pela API, como em produtos e estoque.
+- **Permissões novas:** `customers.edit` e `customers.delete`. `customers.view` e
+  `customers.create` já estavam no seed. Total semeado: 24.
+- 31 testes em `tests/Integration/CustomerTest.php`, incluindo os três casos que mais
+  importam: cliente de outro tenant em 404, viewer que lê mas não escreve, e formulário
+  nativo com documento duplicado respondendo erro amigável (não erro do driver).
+
+#### Dívida desta entrada
+
+1. **Sem probe no MySQL real e sem smoke HTTP.** A etapa mexe em SQL (subquery de
+   agregação, `LEFT JOIN`, `ON DELETE SET NULL` dependente do schema real) e a regra
+   escrita no topo deste diário exige probe quando toca banco. Os testes usam SQLite em
+   memória e o fixture é escrito à mão — foi exatamente essa combinação que escondeu o
+   `si.tenant_id` na Etapa 4. **Antes de dar a Etapa 6 por validada, rodar o probe e o
+   smoke**, e conferir `ApiIntegrationTestCase` contra as migrations.
+2. **`docs/openapi-mvp.yaml` continua congelado em 2026-08-01.** São ~30 endpoints já
+   implementados sem documentação — todos os de `/stock*` e `/customers*`, além de
+   `/users*`, `/roles*`, `/exchange-rates`, `/suppliers`, `/categories`, `/brands`,
+   `/imports/{id}/reopen` e `/products/{id}/price-suggestion`. Viola o checklist que o
+   próprio roteiro exige para toda rota nova.
+3. **Bug de merge no menu:** `resources/views/partials/sidebar.php` renderizava o grupo
+   "Operacao" com o link Dashboard **duas vezes** (copy/paste da Etapa 6). Corrigido —
+   era o único bloco duplicado.
+
+#### Dívida de ferramenta que vai atrapalhar a próxima etapa
+
+**`composer test` não termina.** A suíte leva ~6min30s e estoura o `process-timeout`
+de 300s do Composer, que aborta com `The following exception is caused by a process
+timeout` — sem ser falha de teste. Rodar direto:
+
+```powershell
+vendor\bin\phpunit --no-coverage
+```
+
+Pendência de infra: `composer.json` precisa de `"config": { "process-timeout": 900 }`
+(ou `COMPOSER_PROCESS_TIMEOUT=0`). Sem isso, `composer test` é um falso negativo em
+qualquer etapa a partir de agora.
+
+---
+
+### Manutenção — 2026-10-02
+**SEM COMMIT** (working tree) · sem mudança de código de aplicação
+
+Sessão dedicada a fechar a defasagem entre o código e a documentação, sem avançar etapa.
+
+- **O que era verdade e o código já não era:** o bloco "Onde parou" afirmava que as
+  Etapas 4 e 5 estavam sem commit e que a Etapa 6 era a próxima. As três coisas já
+  tinham acontecido (`08b25df`, `42e3db2`, `7f507ce`). Corrigido.
+- **`SEM COMMIT` removido** dos títulos das Etapas 3, 4 e 5, com o hash e a data reais de
+  cada uma. Registrou-se também que a mensagem de `42e3db2` diz "etapa 3" e a de
+  `7f507ce` diz "etapa nem sei" — é a padronização de commits que a Etapa 10 tem em
+  aberto, mas o mapa etapa↔commit agora está explícito aqui.
+- **`roteiro.md`**: os 6 itens `P1` da Etapa 6 marcados como concluídos (o código já os
+  tinha), com as duas decisões de escopo da etapa e as permissões novas; cabeçalho
+  "Estado atual do código" corrigido; barra da Etapa 6 completada e a convenção da
+  barra explicitada (conta `P0` + `P1`, não `P2` — por isso a Etapa 5 segue pela metade).
+- **Bug de menu corrigido:** `sidebar.php` renderizava o grupo "Operacao" com o Dashboard
+  duplicado, resíduo de copy/paste da Etapa 6. O usuário com permissão `dashboard.view`
+  via o mesmo link duas vezes no menu.
+- **Dois typos** no diário corrigidos ("importaçãovinculado", "oPedido").
+- **Números do estado atual reconferidos no código:** 88 rotas (62 API), 24 permissões,
+  71 arquivos em `app/`, 17 de teste, 118 arquivos no lint, 16 migrations.
+- **Validação desta sessão:** `composer lint` verde (118 arquivos) e suíte completa
+  verde (277 testes / 1247 asserções). Esta é a **primeira** rodada que cobre as edições
+  finais em `CustomerRepository.php` — o último `test-results` no repositório era de
+  16:39 e o arquivo foi modificado às 16:43, então havia ~4 minutos de código sem
+  nenhuma cobertura. **Probe no MySQL e smoke HTTP continuam pendentes para a Etapa 6.**
+
+---
+
+## Estado atual do repositório (2026-10-02)
 
 | Métrica | Valor |
 |---|---|
-| Suíte de testes | 246 testes / 1045 asserções, verde |
-| `composer lint` | 113 arquivos, sem erro de sintaxe |
-| Probe MySQL real | 16/16, banco restaurado ao seed |
-| Smoke HTTP | 29/29, banco restaurado ao seed |
-| Migrations | 16 (`000001` a `000016`) — a Etapa 5 exigiu a `000016` |
-| Tabelas | 30 (nenhuma nova; a Etapa 5 não criou `product_lots`) |
-| Rotas | 79 (56 de API) |
-| Permissões semeadas | 22 — a Etapa 5 reusou `stock.view`/`stock.adjust`, nenhuma nova |
-| Arquivos PHP em `app/` | 67 |
-| Arquivos de teste | 14 |
-| Último commit | `42e3db2 etapa 3` (contém a Etapa 4) |
-| Banco MySQL local | no estado do seed (1 tenant, 5 perfis, 1 usuário, 22 permissões) |
+| Suíte de testes | **277 testes / 1247 asserções, verde** (rodada em 2026-10-02) |
+| `composer lint` | **118 arquivos**, sem erro de sintaxe |
+| Probe MySQL real | 16/16 — **da Etapa 5; a Etapa 6 ainda não foi sondada** |
+| Smoke HTTP | 29/29 — **da Etapa 5; a Etapa 6 ainda não foi sondada** |
+| Migrations | 16 (`000001` a `000016`) — a Etapa 6 não exigiu migration |
+| Tabelas | 30 (nenhuma nova; nem `product_lots` nem tabela de cliente) |
+| Rotas | **88** (62 de API) — a Etapa 6 somou 9 (3 web + 6 API) |
+| Permissões semeadas | **24** — a Etapa 6 criou `customers.edit` e `customers.delete` |
+| Arquivos PHP em `app/` | **71** |
+| Arquivos de teste | **17** |
+| Último commit | `7f507ce etapa nem sei` (contém a Etapa 6) |
+| Banco MySQL local | estado desconhecido desde a Etapa 5 — reconferir antes do probe |
+| Endpoints no OpenAPI | 20 de 88 — **`docs/openapi-mvp.yaml` congelado em 2026-08-01** |
 
 Migrations mais recentes já aplicadas no MySQL local: `000013` (unique em
 `tenants`), `000014` (`users.auth_version`), `000015`
 (`imports.allocation_method` e `completed_at`), `000016` (três `CHECK` de invariante
 em `stock` e dois índices de histórico em `stock_movements`).
 
+**Correção em relação ao registro anterior:** a tabela acima dizia "Etapas 4 e 5 ainda
+NÃO commitadas" e "246 testes / 113 arquivos / 79 rotas / 22 permissões". Os commits
+aconteceram (`08b25df` e `42e3db2`) e a Etapa 6 já está em `7f507ce`. Os números acima
+são reconferidos no código em 2026-10-02.
+
 ## Onde parou
 
-- **Etapas 4 e 5 implementadas e validadas, ambas ainda NÃO commitadas.** A Etapa 5 é
-  o ponto exato de retomada: código, migration `000016` aplicada, docs atualizadas.
-- A Etapa 3 está commitada em `5e38611`; a Etapa 4 em `42e3db2` (mensagem `etapa 3`).
-- **Bug multi-tenant corrigido nesta etapa:** `StockRepository::ensureRow()` criava
-  linha de estoque para produto de outra empresa. O smoke HTTP contra o MariaDB real
-  foi o que pegou — os testes passavam por motivo errado.
+- **Etapa 6 (Clientes e CRM) implementada e commitada em `7f507ce`.** A Etapa 7 é o
+  ponto exato de retomada.
+- **O que falta para dar a Etapa 6 por validada:** probe no MySQL real e smoke HTTP.
+  A suíte e o lint estão verdes, mas os dois correm em SQLite e não cobrem o schema
+  real. Ver "Dívida desta entrada" na Etapa 6.
+- `docs/openapi-mvp.yaml` está congelado desde 2026-08-01, com ~30 endpoints
+  implementados e não documentados, contra o checklist que o próprio roteiro exige.
+- **`composer test` estoura o `process-timeout` do Composer** com a suíte atual
+  (~6min30s > 300s) e reporta falso negativo. Rodar `vendor\bin\phpunit --no-coverage`.
 - Rastreio por lote (`product_lots`) adiado para etapa própria, por decisão de escopo;
   rastreabilidade atual é por `import_item_id`.
-- Próxima etapa do roteiro: **Etapa 6 — Clientes e CRM (EPIC 07)**.
+- A reserva de estoque da Etapa 5 **não se prende a venda** — `reserved_quantity` é um
+  número no produto. O encaixe é o primeiro item da Etapa 7.
+- Próxima etapa do roteiro: **Etapa 7 — Vendas e checkout (EPIC 08)**.
 
 ## Decisões técnicas consolidadas
 
@@ -317,6 +429,16 @@ em `stock` e dois índices de histórico em `stock_movements`).
 - **`default_import_item_id` é informado, não derivado.** Escolher o item por SKU
   seria ambíguo: itens de importações diferentes podem trazer o mesmo SKU de
   fabricante, e o custo seria semeado errado sem aviso.
+- **Identificador de documento é gravado canônico (só dígito) e vazio vira `NULL`.**
+  Sem isso o `UNIQUE` do banco não pega a duplicata e a busca mostra duas linhas para a
+  mesma pessoa. `NULL` é distinto no índice; string vazia não.
+- **`DELETE` de cliente é desfecho, não erro**: com venda concluída, desativa; sem
+  histórico, apaga. A API responde 200 nos dois e distingue no corpo. `sales.customer_id`
+  é `ON DELETE SET NULL`, então a garantia da pré-condição fica no serviço.
+- **Só venda `COMPLETED` conta como histórico comercial** — para o resumo e para
+  decidir entre bloquear e apagar.
+- **Listagem e detalhe repetem o filtro de tenant e de `COMPLETED` de propósito:** é o
+  que impede `total`/`data` e lista/detalhe de contarem coisas diferentes.
 
 ## Pendências e limitações conhecidas
 
@@ -364,12 +486,34 @@ em `stock` e dois índices de histórico em `stock_movements`).
   - Checagem de disponibilidade na reserva é leitura sem `SELECT ... FOR UPDATE`: duas
     reservas simultâneas podem passar pela checagem, e a segunda é barrada pela
     constraint do banco (erro do driver, não mensagem de domínio).
+- **Etapa 6**
+  - **`P2` Fichas, anotações e timeline.** Existe `customers.notes` como texto livre no
+    cadastro, sem data/autor e sem registro de interação.
+  - **`P2` Segmentação, etiqueta e lista de aniversário/ano-versário** não iniciadas.
+  - **Edição e bloqueio de cliente só existem como API.** As telas são de leitura mais o
+    formulário nativo de cadastro — mesma decisão de escopo de produtos e estoque.
+  - Checagem de documento duplicado é leitura fora da transação de gravação: dois
+    cadastros simultâneos com o mesmo documento podem passar pela checagem e um falhar
+    no índice único (erro do driver, não mensagem de domínio).
+  - O resumo comercial é **derivado das vendas** e considera só `COMPLETED`. Enquanto a
+    Etapa 7 não existir, ele é sempre zero em um banco de verdade — os testes semeam
+    venda para exercitar o caminho. Não ler isso como cliente sem histórico.
+  - Sem validação no MySQL real nem smoke HTTP (ver a entrada da Etapa 6).
 - **Transversal**
+  - **`docs/openapi-mvp.yaml` congelado em 2026-08-01:** 20 de 88 endpoints
+    documentados. Viola o checklist do próprio `roteiro.md`.
+  - **`composer test` estoura o `process-timeout` de 300s** e reporta falso negativo.
+    Rodar `vendor\bin\phpunit --no-coverage`, ou adicionar
+    `"config": { "process-timeout": 900 }` no `composer.json`.
+  - **Mensagens de commit não seguem convenção** (`etapa nem sei`, `etapa 3` na Etapa 4).
+    A Etapa 10 ainda tem esse item em aberto.
   - PHPStan/PHPCS pendentes de instalação.
   - **Fixture de teste pode divergir do schema real** e esconder bugs. Ao adicionar
     coluna, conferir `ApiIntegrationTestCase` contra a migration. Foi exatamente isso
     que escondeu o erro de `si.tenant_id` na Etapa 4.
   - **Teste de isolamento que não autentica não testa isolamento** — ver Etapa 5.
+  - **Bootstrap 5 nunca foi adotado**, apesar de `manual/69` fixá-lo na stack: todas as
+    telas usam `<style>` inline. Está na Etapa 9 como P1.
 
 ## Bloqueios
 
@@ -382,20 +526,31 @@ em `stock` e dois índices de histórico em `stock_movements`).
 
 ## Próximo passo
 
-1. Commitar as Etapas 4 e 5 (ou revisar antes).
-2. Seguir para a **Etapa 6 — Clientes e CRM (EPIC 07)**.
-3. Dívida que convém atacar cedo: rateio por peso/combinação (definir o campo de
-   peso), rate limit de login e a tela de ajuste de estoque.
+1. **Etapa 7 — Vendas e checkout (EPIC 08).** É a próxima da sequência crítica de valor
+   (3 → 5 → 7 → 8) e o elo que falta: as 6 tabelas de venda existem e nenhuma rota foi
+   implementada. O primeiro item é ligar `reserved_quantity` (Etapa 5) à venda, que hoje
+   é um número solto no produto.
+2. **Antes de começar a Etapa 7, fechar as pendências da Etapa 6** — probe no MySQL real
+   e smoke HTTP. Abrir a próxima etapa com a anterior só validada em SQLite repete
+   exatamente o padrão que já custou tempo duas vezes.
+3. Dívida que convém atacar cedo, toda listada em **Transversal**: o
+   `composer.json` sem `process-timeout`, o `docs/openapi-mvp.yaml` congelado, o rateio
+   por peso/combinação (definir o campo de peso), o rate limit de login e a tela de
+   ajuste de estoque.
 
 ## Como validar
 
 ```powershell
-composer lint                          # sintaxe
-composer test                          # 246 testes / 1045 asserções
+composer lint                          # sintaxe (rápido)
+vendor\bin\phpunit --no-coverage       # 277 testes / 1247 asserções (~6min30s)
 composer migrate                       # aplica migrations pendentes
 composer seed                          # idempotente
 php -S localhost:8000 -t public public/index.php   # smoke manual
 ```
+
+- **`composer test` não serve para a suíte atual:** o `process-timeout` de 300s do
+  Composer aborta o processo e a falha aparece como timeout, não como teste vermelho.
+  Use `vendor\bin\phpunit` direto até o `composer.json` ser ajustado.
 
 - Probe de banco e smoke HTTP foram executados com scripts temporários fora do
   repositório; o banco local é conferido e restaurado ao seed ao final.

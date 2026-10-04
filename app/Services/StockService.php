@@ -133,6 +133,11 @@ final class StockService
      * Exige que o disponivel cubra a reserva: e a diferenca entre reservar e
      * prometer mercadoria que nao existe.
      *
+     * `sale_item_id` amarra a reserva a linha da venda. Sem esse vinculo a
+     * reserva e um numero solto no produto: ninguem descobre de qual pedido ela
+     * veio, e o cancelamento da venda passa a depender de o usuario lembrar
+     * quanto tinha reservado.
+     *
      * @param array<string, mixed> $data
      *
      * @return array<string, mixed>
@@ -147,6 +152,7 @@ final class StockService
                 'product_id' => $productId,
                 'type' => StockRepository::TYPE_RESERVE,
                 'quantity' => $quantity,
+                'sale_item_id' => $this->saleItemId($data),
                 'reference_type' => $data['reference_type'] ?? 'manual_reservation',
                 'reference_id' => $this->referenceId($data),
                 'notes' => $this->notes($data),
@@ -172,6 +178,7 @@ final class StockService
                 'product_id' => $productId,
                 'type' => StockRepository::TYPE_RELEASE,
                 'quantity' => $quantity,
+                'sale_item_id' => $this->saleItemId($data),
                 'reference_type' => $data['reference_type'] ?? 'manual_reservation',
                 'reference_id' => $this->referenceId($data),
                 'notes' => $this->notes($data),
@@ -208,9 +215,73 @@ final class StockService
     }
 
     /**
+     * Entrega a mercadoria de uma venda concluida (EPIC 08).
+     *
+     * `consume_reserved` faz o repositorio debitar saldo fisico e reserva na mesma
+     * movimentacao. E obrigatorio aqui e nao opcional: a venda reserva na
+     * criacao e conclui depois, e nesse intervalo a reserva existe. Debitar o
+     * saldo sem consumir a reserva deixaria `reserved > quantity` no fim do
+     * caminho, e a constraint do banco derrubaria a operacao.
+     *
      * @param array<string, mixed> $data
      *
      * @return array<string, mixed>
+     */
+    public function deliverForSale(array $data): array
+    {
+        $productId = $this->productId($data);
+        $quantity = $this->positiveDecimal($data['quantity'] ?? null, 'quantity');
+
+        return $this->stock->transactional(
+            fn (): array => $this->stock->apply([
+                'product_id' => $productId,
+                'type' => StockRepository::TYPE_SALE_OUT,
+                'quantity' => $quantity,
+                'consume_reserved' => true,
+                'sale_item_id' => $this->saleItemId($data),
+                'reference_type' => 'sale',
+                'reference_id' => $this->referenceId($data),
+                'notes' => $this->notes($data),
+            ]),
+        );
+    }
+
+    /**
+     * Reentrada por devolucao de venda (EPIC 08).
+     *
+     * Nao consome reserva e nao mexe em `reserved_quantity`. A mercadoria ja
+     * tinha saido do estoque na conclusao da venda, entao nao existe reserva viva
+     * desta unidade. Encostar na reserva aqui seria errado duas vezes: debitaria
+     * a reserva que pertence a outra venda do mesmo produto e, se nao houvesse
+     * nenhuma, zeraria `reserved_quantity` num `max(0, ...)`.
+     *
+     * Por isso aqui nao ha `consume_reserved`, ao contrario de
+     * `deliverForSale()`: a entrada e fisica, e o saldo so cresce.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed>
+     */
+    public function receiveReturn(array $data): array
+    {
+        $productId = $this->productId($data);
+        $quantity = $this->positiveDecimal($data['quantity'] ?? null, 'quantity');
+
+        return $this->stock->transactional(
+            fn (): array => $this->stock->apply([
+                'product_id' => $productId,
+                'type' => StockRepository::TYPE_SALE_RETURN_IN,
+                'quantity' => $quantity,
+                'sale_item_id' => $this->saleItemId($data),
+                'reference_type' => 'sale_return',
+                'reference_id' => $this->referenceId($data),
+                'notes' => $this->notes($data),
+            ]),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $data
      */
     public function setMinimumQuantity(array $data): array
     {
@@ -249,6 +320,7 @@ final class StockService
             StockRepository::TYPE_RELEASE => 'Liberacao de reserva',
             StockRepository::TYPE_CONSUME => 'Consumo',
             StockRepository::TYPE_SALE_OUT => 'Saida por venda',
+            StockRepository::TYPE_SALE_RETURN_IN => 'Devolucao de venda',
         ];
     }
 
@@ -317,6 +389,22 @@ final class StockService
         $referenceId = $data['reference_id'] ?? null;
 
         return $referenceId === null || $referenceId === '' ? null : (int) $referenceId;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function saleItemId(array $data): ?int
+    {
+        $saleItemId = $data['sale_item_id'] ?? null;
+
+        if ($saleItemId === null || $saleItemId === '') {
+            return null;
+        }
+
+        $saleItemId = (int) $saleItemId;
+
+        return $saleItemId > 0 ? $saleItemId : null;
     }
 
     /**

@@ -3,7 +3,7 @@
 **Projeto:** ImportControl (vips-fernando)
 **Data de criação:** 2026-09-27
 **Fonte:** análise do estado atual do repositório + `manual/69 — Baseline única do MVP.md` + `manual/70 — Backlog técnico do MVP.md`
-**Estado atual do código:** fundação técnica, autenticação/RBAC, importações (API) e leitura de produtos/estoque implementados. Vendas, financeiro e estoque transacional ainda não existem.
+**Estado atual do código:** fundação técnica, autenticação/RBAC, importações, catálogo, estoque transacional e clientes implementados. **Vendas, financeiro e caixa ainda não existem** — as 10 tabelas de venda e financeiro já estão no schema, sem nenhuma escrita.
 
 ---
 
@@ -398,16 +398,38 @@ produto. Lote com custo congelado é P0 de uma etapa própria (itens 2 e 3 abaix
 
 **Objetivo:** centralizar dados comerciais e histórico de relacionamento.
 
-- [ ] `P1` `CustomerRepository` + `CustomerService`: cadastro, busca por nome/documento/contato.
-- [ ] `P1` API: `GET/POST /api/v1/customers`, `GET/PUT /api/v1/customers/{id}`, com filtros e paginação.
-- [ ] `P1` Telas: listagem com busca/filtros e formulário de cadastro.
-- [ ] `P1` Prevenir duplicidade: bloquear documento já existente no mesmo tenant.
-- [ ] `P1` Histórico comercial do cliente: vendas vinculadas, valor total, última compra.
-- [ ] `P1` Soft delete (bloqueio) em vez de exclusão quando houver histórico.
-- [ ] `P2` Fichas, anotações e timeline de interação.
-- [ ] `P2` Segmentação, etiqueta e lista de aniversário/ano-versário.
+> **Commit:** `7f507ce` (2026-10-01). Os 6 itens `P1` abaixo estão implementados e com suíte verde (277 testes / 1247 asserções, `composer lint` em 118 arquivos). Nenhuma migration e nenhuma tabela nova: a etapa só leu `sales`, que já existia.
+>
+> **Falta a validação no MySQL real e o smoke HTTP.** A etapa toca SQL (subquery de agregação, `LEFT JOIN`, `ON DELETE SET NULL` do schema real) e a regra de validação deste projeto exige probe quando toca banco — foi a validação no MySQL que pegou os bugs das Etapas 4 e 5. Detalhes em `diario_de_bordo.md`.
 
-**Critério de conclusão:** cliente cadastrado aparece na busca por qualquer critério, não duplica por documento, e o histórico lista as vendas do próprio tenant.
+### Decisões de escopo
+
+Duas decisões que moldaram a etapa e que valem ficar registradas aqui:
+
+1. **`DELETE` não é exceção, é desfecho.** Cliente com venda concluída é **desativado**;
+   sem histórico, é **apagado**. A API responde 200 nos dois casos e distingue os
+   desfechos no corpo (`blocked`, `purchases`) em vez de lançar erro — um DELETE tem
+   dois resultados legítimos, e obrigar o controller a adivinhar seria pior.
+2. **Documento canônico em dígitos.** "123.456.789-01" e "12345678901" são o mesmo
+   CPF. Guardar as duas formas faria o `UNIQUE (tenant_id, document)` não pegar a
+   duplicata (as strings diferem) enquanto a busca mostraria duas linhas para a mesma
+   pessoa. Vazio é gravado como `NULL`, não string vazia, porque `NULL` é distinto no
+   índice único e duas strings vazias colidiriam.
+
+- [x] `P1` `CustomerRepository` + `CustomerService`: cadastro, busca por nome/documento/contato.
+- [x] `P1` API: `GET/POST /api/v1/customers`, `GET/PUT /api/v1/customers/{id}`, com filtros e paginação. — *acrescentados `DELETE /api/v1/customers/{id}` e `GET /api/v1/customers/{id}/history`*
+- [x] `P1` Telas: listagem com busca/filtros e formulário de cadastro. — *`/clientes` (filtro por busca, situação e "já comprou") e `/clientes/{id}` (ficha + resumo + histórico). Edição e bloqueio só pela API, como em produtos e estoque*
+- [x] `P1` Prevenir duplicidade: bloquear documento já existente no mesmo tenant. — *mensagem de domínio (400), não "duplicate key" do driver; a checagem exclui o próprio id no `update`*
+- [x] `P1` Histórico comercial do cliente: vendas vinculadas, valor total, última compra. — *resumo com `purchase_count`, `total_spent`, `total_profit`, `average_ticket` e `last_purchase_at`, considerando só vendas `COMPLETED`*
+- [x] `P1` Soft delete (bloqueio) em vez de exclusão quando houver histórico. — *venda `CANCELLED` não conta como histórico: o cliente volta a ser apagável*
+- [ ] `P2` Fichas, anotações e timeline de interação. — *parcial: existe `customers.notes` como texto livre no cadastro; não há registro de interação com data/autor nem timeline*
+- [ ] `P2` Segmentação, etiqueta e lista de aniversário/ano-versário. — *não iniciado*
+
+**Permissões novas:** `customers.edit` e `customers.delete` (`customers.view` e
+`customers.create` já existiam). Total semeado: 24.
+
+**Critério de conclusão:** cliente cadastrado aparece na busca por qualquer critério, não duplica por documento, e o histórico lista as vendas do próprio tenant. — **atingido** (`tests/Integration/CustomerTest.php`, 31 testes)
+
 
 ---
 
@@ -508,7 +530,7 @@ ETAPA 2  Auth + RBAC + Tenant            ██████████  (~5 dia
 ETAPA 3  Núcleo de custo (rateio)        ██████████  (~5 dias)   ★ núcleo do produto
 ETAPA 4  Produtos e preços               ██████████  (~3 dias)   MVP
 ETAPA 5  Estoque transacional            ▓▓▓▓▓░░░░░  (~5 dias)   MVP ★
-ETAPA 6  Clientes e CRM                  ▓▓▓░░░░░░░  (~3 dias)   MVP
+ETAPA 6  Clientes e CRM                  ██████████  (~3 dias)   MVP
 ETAPA 7  Vendas e checkout               ▓▓▓▓▓▓▓░░░  (~7 dias)   MVP ★
 ETAPA 8  Financeiro e caixa              ▓▓▓▓▓▓░░░░  (~5 dias)   MVP
 ETAPA 9  Dashboard e UX                  ▓▓▓▓░░░░░░  (~4 dias)   MVP
@@ -516,6 +538,10 @@ ETAPA 10 Fechamento e produção           ▓▓░░░░░░░░  (~3 d
 ```
 
 ★ = etapas de maior risco e maior valor de negócio.
+
+A barra conta o MVP, não o pós-MVP: `██████████` significa **todo `P0` e todo `P1`
+concluídos**, mesmo com `P2` pendente. A Etapa 5 aparece pela metade porque ainda tem
+um `P0` em aberto (tabela de lotes, adiada por decisão de escopo).
 
 **Sequência crítica de valor:** Etapa 3 → 5 → 7 → 8. É por ela que o usuário descobre o **custo real** e o **lucro** — o motivo do sistema existir.
 

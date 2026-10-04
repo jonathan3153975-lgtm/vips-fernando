@@ -12,6 +12,7 @@ use App\Controllers\Api\ExchangeRateApiController;
 use App\Controllers\Api\ImportApiController;
 use App\Controllers\Api\ProductApiController;
 use App\Controllers\Api\RoleApiController;
+use App\Controllers\Api\SaleApiController;
 use App\Controllers\Api\StockApiController;
 use App\Controllers\Api\SupplierApiController;
 use App\Controllers\Api\UserApiController;
@@ -39,6 +40,7 @@ use App\Repositories\PasswordResetRepository;
 use App\Repositories\PermissionRepository;
 use App\Repositories\ProductRepository;
 use App\Repositories\RoleRepository;
+use App\Repositories\SaleRepository;
 use App\Repositories\StockRepository;
 use App\Repositories\SupplierRepository;
 use App\Repositories\TenantRepository;
@@ -54,6 +56,7 @@ use App\Services\PasswordResetService;
 use App\Services\PricingService;
 use App\Services\ProductService;
 use App\Services\RoleService;
+use App\Services\SaleService;
 use App\Services\StockService;
 use App\Services\SupplierService;
 use App\Services\TenantService;
@@ -91,6 +94,13 @@ $productService = new ProductService(
 $roleRepository = new RoleRepository();
 $stockService = new StockService($stockRepository);
 $customerService = new CustomerService(new CustomerRepository(), $auditLogRepository);
+$saleService = new SaleService(
+    new SaleRepository(),
+    $productRepository,
+    $stockService,
+    $auditLogRepository,
+    $authService,
+);
 $tenantService = new TenantService(
     $tenantRepository,
     $auditLogRepository,
@@ -359,6 +369,57 @@ $router->delete('/api/v1/customers/{id}', static fn (int $id): array => $newCust
 $router->get('/api/v1/customers/{id}/history', static fn (int $id): array => $newCustomerApiController()->history($id), [
 	$auth,
 	$permission('customers.view'),
+]);
+
+// Vendas e checkout (EPIC 08). As quatro leituras usam sales.view; cada escrita
+// exige a permissao do roteiro, e nao uma permissao unica de "vendas": quem
+// registra uma venda nao pode, por isso mesmo, conceder desconto de 40%
+// (sales.discount), reescrever o preco de tabela (sales.change_price), cancelar
+// venda alheia (sales.cancel) nem estornar mercadoria (sales.return).
+//
+// `POST /api/v1/sales` reserva o estoque na criacao, e nao na conclusao: entre
+// abrir o pedido e fechar, a mercadoria continua disponivel para outro
+// vendedor. `complete` e o unico caminho que baixa saldo.
+$saleApiController = static fn (): SaleApiController => new SaleApiController($saleService);
+
+$router->get('/api/v1/sales/options', static fn (): array => $saleApiController()->options(), [
+	$auth,
+	$permission('sales.view'),
+]);
+// Antes de `/api/v1/sales/{id}` de proposito: o `{id}` compila para `[^/]+`
+// ancorado, entao casaria com a palavra "options" e tentaria converter para int.
+$router->get('/api/v1/sales', static fn (): array => $saleApiController()->index(), [
+	$auth,
+	$permission('sales.view'),
+]);
+$router->post('/api/v1/sales', static fn (): array => $saleApiController()->store(), [
+	$auth,
+	$permission('sales.create'),
+]);
+$router->get('/api/v1/sales/{id}', static fn (int $id): array => $saleApiController()->show($id), [
+	$auth,
+	$permission('sales.view'),
+]);
+$router->post('/api/v1/sales/{id}/items', static fn (int $id): array => $saleApiController()->addItem($id), [
+	$auth,
+	$permission('sales.create'),
+]);
+$router->post('/api/v1/sales/{id}/complete', static fn (int $id): array => $saleApiController()->complete($id), [
+	$auth,
+	$permission('sales.create'),
+]);
+$router->post('/api/v1/sales/{id}/cancel', static fn (int $id): array => $saleApiController()->cancel($id), [
+	$auth,
+	$permission('sales.cancel'),
+]);
+// Devolucao e cancelamento sao rotas separadas porque as situacoes sao
+// mutuamente exclusivas: `cancel` so vale para venda aberta e `return` so para
+// venda concluida. Uma rota unica com um `action` no corpo deixaria o
+// permission check do lado errado — quem tem sales.return e nao sales.cancel
+// cancelaria a propria venda.
+$router->post('/api/v1/sales/{id}/returns', static fn (int $id): array => $saleApiController()->returnItems($id), [
+	$auth,
+	$permission('sales.return'),
 ]);
 
 $userService = new UserService($userRepository, $roleRepository, $auditLogRepository);

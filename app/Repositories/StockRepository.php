@@ -32,9 +32,17 @@ final class StockRepository extends TenantScopedRepository
     public const TYPE_SALE_OUT = 'SALE_OUT';
 
     /**
+     * Reentrada por devolucao de venda (EPIC 08). Tipo proprio, e nao
+     * `MANUAL_IN`: o historico precisa distinguir "o cliente devolveu" de "alguem
+     * deu entrada no estoque". Sem isso, a rastreabilidade da venda se perde no
+     * primeiro processo de inventario.
+     */
+    public const TYPE_SALE_RETURN_IN = 'SALE_RETURN_IN';
+
+    /**
      * Tipos que aumentam o saldo fisico.
      */
-    public const INFLOW_TYPES = [self::TYPE_IMPORT_ENTRY, self::TYPE_MANUAL_IN];
+    public const INFLOW_TYPES = [self::TYPE_IMPORT_ENTRY, self::TYPE_MANUAL_IN, self::TYPE_SALE_RETURN_IN];
 
     /**
      * Tipos que reduzem o saldo fisico.
@@ -57,6 +65,7 @@ final class StockRepository extends TenantScopedRepository
         self::TYPE_RELEASE,
         self::TYPE_CONSUME,
         self::TYPE_SALE_OUT,
+        self::TYPE_SALE_RETURN_IN,
     ];
 
     /**

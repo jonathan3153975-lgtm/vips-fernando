@@ -226,7 +226,7 @@ abstract class ApiIntegrationTestCase extends TestCase
 
         $statements = [
             'CREATE TABLE tenants (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, document TEXT, email TEXT, phone TEXT, logo TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT)',
-            'CREATE TABLE tenant_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT \'BRL\', timezone TEXT NOT NULL DEFAULT \'America/Sao_Paulo\', language TEXT NOT NULL DEFAULT \'pt-BR\', date_format TEXT NOT NULL DEFAULT \'d/m/Y\', created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE tenant_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL UNIQUE, currency TEXT NOT NULL DEFAULT \'BRL\', timezone TEXT NOT NULL DEFAULT \'America/Sao_Paulo\', language TEXT NOT NULL DEFAULT \'pt-BR\', date_format TEXT NOT NULL DEFAULT \'d/m/Y\', max_discount_percent REAL NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER, name TEXT NOT NULL, description TEXT, is_system INTEGER NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT, updated_at TEXT)',
             'CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT)',
@@ -248,10 +248,26 @@ abstract class ApiIntegrationTestCase extends TestCase
             // Sem esta tabela o fixture divergiria do MySQL — customers existe la e e
             // referenciada por sales.customer_id.
             'CREATE TABLE customers (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, name TEXT NOT NULL, document TEXT, phone TEXT, whatsapp TEXT, email TEXT, address TEXT, notes TEXT, status TEXT NOT NULL DEFAULT \'ACTIVE\', created_at TEXT, updated_at TEXT, UNIQUE(tenant_id, document))',
-            'CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, customer_id INTEGER, user_id INTEGER, sale_number TEXT, status TEXT NOT NULL, subtotal REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0, total REAL NOT NULL DEFAULT 0, cost_total REAL NOT NULL DEFAULT 0, profit REAL NOT NULL DEFAULT 0, sale_date TEXT, completed_at TEXT, cancelled_at TEXT, created_at TEXT, updated_at TEXT)',
             // sale_items NAO tem tenant_id: o escopo vem de sales. Espelhar o
             // schema real, senao uma query errada passa no SQLite e quebra no MySQL.
             'CREATE TABLE sale_items (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, product_id INTEGER NOT NULL, quantity REAL NOT NULL, cost_price REAL NOT NULL DEFAULT 0, sale_price REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0, subtotal REAL NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT)',
+            // UNIQUE(tenant_id, sale_number) faz parte do schema real (000011) e
+            // e o que sustenta `nextSaleNumber()`. Sem ele aqui, dois testes
+            // gravariam o mesmo numero sem falhar.
+            'CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, customer_id INTEGER, user_id INTEGER, sale_number TEXT NOT NULL, status TEXT NOT NULL, subtotal REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0, total REAL NOT NULL DEFAULT 0, cost_total REAL NOT NULL DEFAULT 0, profit REAL NOT NULL DEFAULT 0, sale_date TEXT, completed_at TEXT, cancelled_at TEXT, created_at TEXT, updated_at TEXT, UNIQUE(tenant_id, sale_number))',
+            // sale_discounts, payments, sale_returns e sale_return_items tambem
+            // nao tem tenant_id (escopo via sales). sale_return_items e a migration
+            // 000018: sem ela a devolucao por item nao tem onde gravar a quantidade
+            // devolvida, que e a trava contra devolver duas vezes a mesma
+            // mercadoria.
+            'CREATE TABLE sale_discounts (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, type TEXT NOT NULL, value REAL NOT NULL, user_id INTEGER, reason TEXT, created_at TEXT)',
+            'CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, method TEXT NOT NULL, amount REAL NOT NULL, installments INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT \'PENDING\', payment_date TEXT, created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE sale_returns (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL, customer_id INTEGER, reason TEXT, amount REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT \'OPEN\', created_at TEXT, updated_at TEXT)',
+            'CREATE TABLE sale_return_items (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_return_id INTEGER NOT NULL, sale_item_id INTEGER NOT NULL, product_id INTEGER NOT NULL, quantity REAL NOT NULL, amount REAL NOT NULL DEFAULT 0, created_at TEXT)',
+            // accounts_receivable e financial_transactions tambem nao tem FK de
+            // tenant em accounts_receivable, mas tem tenant_id — o escopo e por ele,
+            // junto com o JOIN em sales que impede ler titulo de outra venda.
+            'CREATE TABLE accounts_receivable (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, customer_id INTEGER, sale_id INTEGER, description TEXT NOT NULL, amount REAL NOT NULL, due_date TEXT NOT NULL, payment_date TEXT, status TEXT NOT NULL DEFAULT \'PENDING\', created_at TEXT, updated_at TEXT)',
         ];
 
         foreach ($statements as $statement) {
@@ -295,6 +311,14 @@ abstract class ApiIntegrationTestCase extends TestCase
             14 => 'customers.create',
             15 => 'customers.edit',
             16 => 'customers.delete',
+            // EPIC 08. Nomes iguais aos do seed de producao (database/seed.php):
+            // o que importa para o RBAC e o nome, nao o id.
+            17 => 'sales.view',
+            18 => 'sales.create',
+            19 => 'sales.discount',
+            20 => 'sales.change_price',
+            21 => 'sales.cancel',
+            22 => 'sales.return',
         ];
 
         foreach ($permissions as $id => $name) {
@@ -312,7 +336,11 @@ abstract class ApiIntegrationTestCase extends TestCase
         // stock.adjust (12) e customers.edit/delete (15, 16) vao para os admins e
         // NAO para o viewer, para que a separacao entre ler cadastro e mexer no
         // cadastro seja testavel.
-        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [1, 11], [1, 12], [1, 13], [1, 14], [1, 15], [1, 16], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10], [3, 11], [3, 12], [3, 13], [3, 14], [3, 15], [3, 16]];
+        //
+        // O viewer tambem fica sem NENHUMA permissao `sales.*` (17-22). Conceder
+        // sales.view a ele destruiria a premissa do seed — e o 403 no GET vale
+        // mais para o teste: quem nao pode vender nao tem por que listar venda.
+        $grants = [[1, 1], [1, 2], [1, 3], [1, 4], [1, 5], [1, 6], [1, 7], [1, 8], [1, 9], [1, 10], [1, 11], [1, 12], [1, 13], [1, 14], [1, 15], [1, 16], [1, 17], [1, 18], [1, 19], [1, 20], [1, 21], [1, 22], [2, 2], [3, 1], [3, 2], [3, 3], [3, 4], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10], [3, 11], [3, 12], [3, 13], [3, 14], [3, 15], [3, 16], [3, 17], [3, 18], [3, 19], [3, 20], [3, 21], [3, 22]];
 
         foreach ($grants as [$roleId, $permissionId]) {
             $statement = $pdo->prepare('INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (:role_id, :permission_id, :created_at)');
@@ -444,6 +472,45 @@ abstract class ApiIntegrationTestCase extends TestCase
         $statement->execute($params);
 
         return $statement->rowCount();
+    }
+
+    /**
+     * INSERT direto, devolvendo o id gerado.
+     *
+     * Para os poucos estados que a API nao produz mas que o servico precisa
+     * recusar — venda sem item, por exemplo. Criar esse estado pela API nao e
+     * possivel (o contrato exige ao menos um item), entao o teste tem de monta-lo
+     * para provar que `complete()` nao aceita venda vazia.
+     */
+    protected function insertSql(string $sql, array $params = []): int
+    {
+        // A mesma conexao no INSERT e no lastInsertId(): `pdo()` abre um PDO novo
+        // a cada chamada, e `lastInsertId()` de outra conexao devolve 0.
+        $pdo = $this->pdo();
+
+        $statement = $pdo->prepare($sql);
+        $statement->execute($params);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * Teto de desconto do tenant (migration 000017).
+     *
+     * Nenhuma rota da Etapa 7 escreve esta coluna — quem faz isso e a tela de
+     * configuracoes, do TenantService, que e da Etapa 8. Os testes de desconto
+     * precisam de um teto diferente de zero para provar os dois lados da regra
+     * (dentro do limite passa sem permissao, acima exige `sales.discount`), e
+     * nao faz sentido esperar a Etapa 8 para isso.
+     */
+    protected function setMaxDiscountPercent(int $tenantId, float $percent): void
+    {
+        $updated = $this->execSql(
+            'UPDATE tenant_settings SET max_discount_percent = ? WHERE tenant_id = ?',
+            [$percent, $tenantId],
+        );
+
+        self::assertSame(1, $updated, 'o tenant ' . $tenantId . ' deveria ter linha em tenant_settings');
     }
 
     /**
